@@ -1,0 +1,213 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "generated": "2026-05-16T18:00:00Z",
+    "forecast_valid": "2026-05-16T18:00:00Z",
+    "forecast_source": "GFS 0.25° (demo)",
+    "pressure_hpa": 250,
+    "model": "pycontrails CoCiP (demo)"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "high",
+        "risk_score": 0.91,
+        "altitude_ft": 36000,
+        "temperature_k": 218.4,
+        "rhi": 1.18,
+        "area_km2": 148200,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "High contrail risk — Great Lakes corridor"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-90.0, 41.0], [-85.0, 41.0], [-82.0, 43.0], [-80.0, 45.0],
+          [-82.0, 47.0], [-87.0, 47.5], [-92.0, 46.0], [-93.0, 43.5],
+          [-90.0, 41.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "high",
+        "risk_score": 0.87,
+        "altitude_ft": 34000,
+        "temperature_k": 220.1,
+        "rhi": 1.12,
+        "area_km2": 95400,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "High contrail risk — Pacific Northwest"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-124.0, 44.0], [-118.0, 44.0], [-117.0, 47.5], [-120.0, 49.0],
+          [-125.0, 48.0], [-126.0, 46.0], [-124.0, 44.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "medium",
+        "risk_score": 0.62,
+        "altitude_ft": 32000,
+        "temperature_k": 224.7,
+        "rhi": 1.04,
+        "area_km2": 112800,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "Medium contrail risk — Central Plains"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-100.0, 38.0], [-95.0, 37.0], [-94.0, 40.0], [-96.0, 42.0],
+          [-100.0, 42.5], [-102.0, 41.0], [-100.0, 38.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "medium",
+        "risk_score": 0.55,
+        "altitude_ft": 38000,
+        "temperature_k": 216.2,
+        "rhi": 1.02,
+        "area_km2": 74600,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "Medium contrail risk — Northeast corridor"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-76.0, 39.0], [-72.0, 40.0], [-70.0, 42.0], [-72.0, 43.5],
+          [-75.0, 43.0], [-77.0, 41.5], [-76.0, 39.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "low",
+        "risk_score": 0.28,
+        "altitude_ft": 30000,
+        "temperature_k": 229.0,
+        "rhi": 0.96,
+        "area_km2": 63200,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "Low contrail risk — Texas–Oklahoma"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-103.0, 33.0], [-97.0, 33.0], [-96.0, 36.0], [-100.0, 37.0],
+          [-103.0, 36.0], [-104.0, 34.0], [-103.0, 33.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "low",
+        "risk_score": 0.21,
+        "altitude_ft": 28000,
+        "temperature_k": 234.5,
+        "rhi": 0.88,
+        "area_km2": 42100,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "Low contrail risk — Southeast"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-88.0, 31.0], [-84.0, 31.0], [-83.0, 33.0], [-86.0, 34.5],
+          [-89.0, 33.5], [-90.0, 32.0], [-88.0, 31.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "high",
+        "risk_score": 0.79,
+        "altitude_ft": 35000,
+        "temperature_k": 219.8,
+        "rhi": 1.09,
+        "area_km2": 86700,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "High contrail risk — Rocky Mountains"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-110.0, 39.0], [-106.0, 38.0], [-104.0, 40.0], [-105.0, 43.0],
+          [-108.0, 44.0], [-111.0, 43.0], [-112.0, 41.0], [-110.0, 39.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "medium",
+        "risk_score": 0.48,
+        "altitude_ft": 33000,
+        "temperature_k": 222.3,
+        "rhi": 1.01,
+        "area_km2": 59800,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "Medium contrail risk — California Sierra"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-122.0, 36.0], [-118.0, 36.0], [-117.0, 38.5], [-119.0, 40.0],
+          [-122.5, 39.0], [-123.0, 37.0], [-122.0, 36.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "high",
+        "risk_score": 0.83,
+        "altitude_ft": 37000,
+        "temperature_k": 217.6,
+        "rhi": 1.15,
+        "area_km2": 104300,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "High contrail risk — Canadian Prairies"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-110.0, 49.5], [-103.0, 49.5], [-100.0, 52.0], [-104.0, 54.0],
+          [-109.0, 53.5], [-113.0, 52.0], [-112.0, 50.0], [-110.0, 49.5]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "risk_level": "low",
+        "risk_score": 0.18,
+        "altitude_ft": 29000,
+        "temperature_k": 231.2,
+        "rhi": 0.91,
+        "area_km2": 38900,
+        "valid_time": "2026-05-16T18:00:00Z",
+        "label": "Low contrail risk — Gulf Coast"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-94.0, 29.0], [-90.0, 29.0], [-89.0, 30.5], [-91.0, 31.5],
+          [-94.0, 31.0], [-95.0, 30.0], [-94.0, 29.0]
+        ]]
+      }
+    }
+  ]
+}
