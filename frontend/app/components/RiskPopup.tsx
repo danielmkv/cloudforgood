@@ -1,18 +1,6 @@
 "use client";
 
-import { ContrailFeature } from "./ContrailMap";
-
-const RISK_COLORS: Record<string, string> = {
-  low: "text-violet-400 bg-violet-500/10 border-violet-700",
-  medium: "text-amber-400 bg-amber-500/10 border-amber-700",
-  high: "text-red-400 bg-red-500/10 border-red-700",
-};
-
-const RISK_BAR: Record<string, string> = {
-  low: "bg-violet-500",
-  medium: "bg-amber-500",
-  high: "bg-red-500",
-};
+import { ContrailFeature, featureRiskScore, riskScoreToHex } from "./ContrailMap";
 
 interface Props {
   data: ContrailFeature;
@@ -29,11 +17,35 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 export default function RiskPopup({ data, onClose }: Props) {
-  const risk = data.risk_level;
-  const colorClass = RISK_COLORS[risk] ?? RISK_COLORS.low;
-  const barClass = RISK_BAR[risk] ?? RISK_BAR.low;
-  const tempC = (data.temperature_k - 273.15).toFixed(1);
-  const rhiPct = (data.rhi * 100).toFixed(0);
+  const score = featureRiskScore(data);
+  const accentColor = riskScoreToHex(score);
+
+  // Derive display values — support both schemas
+  const isPersistent = data.label === "persistent" || (data.risk_level === "high") || score >= 0.9;
+  const riskLabel =
+    data.risk_level ??
+    (data.label === "persistent" ? "high" : data.label === "short" ? "medium" : "low");
+
+  const tempC =
+    data.temperature_k !== undefined
+      ? `${(data.temperature_k - 273.15).toFixed(1)} °C (${data.temperature_k.toFixed(1)} K)`
+      : "—";
+
+  const rhiDisplay =
+    data.rhi !== undefined ? `${(data.rhi * 100).toFixed(0)}%` : "—";
+
+  const altDisplay =
+    data.altitude_ft !== undefined
+      ? `${data.altitude_ft.toLocaleString()} ft`
+      : "250 hPa (~34,000 ft)";
+
+  const areaDisplay =
+    data.area_km2 !== undefined ? `${data.area_km2.toLocaleString()} km²` : "—";
+
+  const timeDisplay =
+    data.valid_time !== undefined
+      ? new Date(data.valid_time).toUTCString().replace(" GMT", " UTC")
+      : "—";
 
   return (
     <div className="absolute top-4 right-4 z-[600] w-72 rounded-xl border border-slate-700 bg-slate-900/95 p-4 shadow-2xl backdrop-blur-md">
@@ -41,12 +53,21 @@ export default function RiskPopup({ data, onClose }: Props) {
       <div className="flex items-start justify-between mb-3">
         <div>
           <span
-            className={`inline-block rounded-md border px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${colorClass}`}
+            className="inline-block rounded-md border px-2 py-0.5 text-xs font-bold uppercase tracking-wider"
+            style={{
+              color: accentColor,
+              borderColor: accentColor,
+              background: `color-mix(in srgb, ${accentColor} 15%, transparent)`,
+            }}
           >
-            {risk} risk
+            {riskLabel} risk
           </span>
           <p className="mt-1.5 text-sm font-semibold text-slate-100 leading-snug">
-            {data.label}
+            {data.label === "persistent"
+              ? "Persistent contrail region"
+              : data.label === "short"
+              ? "Short-lived contrail region"
+              : (data as { label?: string }).label ?? "Contrail risk zone"}
           </p>
         </div>
         <button
@@ -62,37 +83,35 @@ export default function RiskPopup({ data, onClose }: Props) {
         <div className="flex justify-between mb-1">
           <span className="text-xs text-slate-400">Risk Score</span>
           <span className="text-xs font-bold text-slate-200">
-            {(data.risk_score * 100).toFixed(0)}%
+            {(score * 100).toFixed(0)}%
           </span>
         </div>
         <div className="h-1.5 w-full rounded-full bg-slate-700">
           <div
-            className={`h-1.5 rounded-full transition-all ${barClass}`}
-            style={{ width: `${data.risk_score * 100}%` }}
+            className="h-1.5 rounded-full transition-all"
+            style={{
+              width: `${score * 100}%`,
+              background: `linear-gradient(to right, hsl(240,85%,57%), ${accentColor})`,
+            }}
           />
         </div>
       </div>
 
-      {/* Stats grid */}
+      {/* Stats */}
       <div className="space-y-2 border-t border-slate-800 pt-3">
-        <Row label="Altitude" value={`${data.altitude_ft.toLocaleString()} ft`} />
-        <Row label="Temperature" value={`${tempC} °C (${data.temperature_k.toFixed(1)} K)`} />
-        <Row label="Rel. Humidity (ice)" value={`${rhiPct}%`} />
-        <Row label="Polygon Area" value={`${data.area_km2.toLocaleString()} km²`} />
-        <Row
-          label="Valid Time"
-          value={new Date(data.valid_time).toUTCString().replace(" GMT", " UTC")}
-        />
+        <Row label="Type" value={isPersistent ? "Persistent (ISSR)" : "Short-lived"} />
+        <Row label="Altitude" value={altDisplay} />
+        <Row label="Temperature" value={tempC} />
+        <Row label="Rel. Humidity (ice)" value={rhiDisplay} />
+        <Row label="Polygon Area" value={areaDisplay} />
+        <Row label="Valid Time" value={timeDisplay} />
       </div>
 
       {/* Interpretation */}
       <p className="mt-3 text-[11px] text-slate-500 leading-relaxed">
-        {risk === "high" &&
-          "High ice-supersaturation. Contrails likely to persist and spread, contributing to warming."}
-        {risk === "medium" &&
-          "Moderate ice-supersaturation. Short-lived contrails possible; cirrus formation likely at cruise altitude."}
-        {risk === "low" &&
-          "Near-threshold humidity. Contrails may form briefly but will quickly sublimate."}
+        {isPersistent
+          ? "Ice-supersaturated air. Contrails will persist and spread into cirrus, contributing to warming."
+          : "Below ice saturation. Contrails form but quickly sublimate — lower climate impact."}
       </p>
     </div>
   );

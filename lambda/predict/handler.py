@@ -1,295 +1,265 @@
 """
-Lambda: predict  (container image — pycontrails + cfgrib)
-==========================================================
-Triggered by S3 ObjectCreated event on:
-    s3://contrai-input/scenes/<scene_id>/manifest.json
+Lambda: predict  (container image)
+===================================
+Triggered by S3 ObjectCreated on s3://contrai-input-711726113023-us-east-1-an/runs/*.grib2
 
-Reads the GFS GRIB2 file at the path in the manifest, runs the
-Schmidt–Appleman criterion + ISSR check at 250 hPa over North America,
-clusters the positive cells into GeoJSON polygons, and writes:
-    s3://contrai-contrails/scenes/<scene_id>/contrails.geojson
-    s3://contrai-contrails/latest.geojson   (overwrite — always current)
+Reads a GFS GRIB2 file, computes contrail-favorable regions using the
+Schmidt–Appleman criterion + ice supersaturation check, vectorises the
+score raster with rasterio (same algorithm as prediction_local/predict_local.py),
+and writes enriched GeoJSON to the output bucket.
 
 Environment variables:
-    INPUT_BUCKET   — source bucket   (e.g. "contrai-input")
-    OUTPUT_BUCKET  — output bucket   (e.g. "contrai-contrails")
-    PRESSURE_LEVEL — hPa level       (default: "250")
-    CLOUDFRONT_DIST_ID — (optional) CloudFront distribution ID to invalidate
+    S3_SRC_BUCKET    — input bucket  (default: contrai-input-711726113023-us-east-1-an)
+    S3_DST_BUCKET    — output bucket (default: contrai-contrails)
+    PRESSURE_LEVEL   — hPa level     (default: 250)
+    CLOUDFRONT_DIST_ID — optional, triggers /latest.geojson invalidation
 """
 
 import json
 import logging
 import math
 import os
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
+import numpy as np
+import xarray as xr
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "contrai-input")
-OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "contrai-contrails")
+S3_SRC_BUCKET = os.environ.get("S3_SRC_BUCKET", "contrai-input-711726113023-us-east-1-an")
+S3_DST_BUCKET = os.environ.get("S3_DST_BUCKET", "contrai-contrails")
 PRESSURE_HPA = float(os.environ.get("PRESSURE_LEVEL", "250"))
 CF_DIST_ID = os.environ.get("CLOUDFRONT_DIST_ID", "")
 
 
-# ── Schmidt–Appleman criterion ────────────────────────────────────────────
-def schmidt_appleman(T_K: float, p_hPa: float, rhi: float) -> bool:
-    T_LC = 226.69 + 9.43 * math.log(max(p_hPa, 1e-6) / 1000) + 0.114 * (p_hPa / 1000)
-    return T_K < T_LC and rhi > 1.0
+# ── Physics helpers ────────────────────────────────────────────────────────
+
+def compute_contrail_score(t: np.ndarray, r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Continuous contrail risk score in [0, 1] — matches prediction_local/predict_local.py.
+
+      cold_factor = clip((233 - T) / 20, 0, 1)   — 0 at SAC threshold, 1 at ~213 K
+      rhi_factor  = clip((RHi - 0.7) / 0.6, 0, 1) — 0 at dry, 1 at strongly supersaturated
+      score       = cold_factor × rhi_factor        (only where T < 233 K)
+
+    t: temperature (K), r: relative humidity over water (%)
+    """
+    e_sat_ice   = 611.21 * np.exp(22.587 * (t - 273.15) / (t - 0.7))
+    e_sat_water = 611.21 * np.exp(17.502 * (t - 273.15) / (t - 32.18))
+    rh_ice = (r / 100.0) * (e_sat_water / e_sat_ice)
+
+    cold_factor = np.clip((233.0 - t) / 20.0, 0.0, 1.0)
+    rhi_factor  = np.clip((rh_ice - 0.7) / 0.6, 0.0, 1.0)
+    score = np.where(t < 233.0, cold_factor * rhi_factor, 0.0).astype(np.float32)
+    return score, rh_ice
 
 
-# ── RH over liquid → RHi conversion ──────────────────────────────────────
-def rhl_to_rhi(rhl_pct: float, T_K: float) -> float:
-    """Convert relative humidity over liquid water (%) to over ice (fraction)."""
-    return (rhl_pct / 100.0) * math.exp(
-        6808.0 * (1.0 / 273.15 - 1.0 / max(T_K, 100.0))
-        - 5.09 * math.log(T_K / 273.15)
+def altitude_ft_from_hpa(p: float) -> int:
+    return int(44307.69 * (1.0 - (p / 1013.25) ** 0.190284))
+
+
+# ── Rasterio vectorisation (mirrors predict_local.py) ─────────────────────
+
+def score_to_features(
+    score: np.ndarray,
+    rh_ice: np.ndarray,
+    t: np.ndarray,
+    lats: np.ndarray,
+    lons: np.ndarray,
+    valid_time: str,
+    simplify_tolerance: float = 0.5,
+) -> list[dict]:
+    import rasterio.features
+    from rasterio.transform import from_bounds
+    from shapely.geometry import shape, mapping
+    from shapely.ops import unary_union
+
+    # Convert 0-360 longitude to -180..180
+    lons_180 = np.where(lons > 180, lons - 360, lons)
+
+    height, width = score.shape
+    transform = from_bounds(
+        west=lons_180.min(), south=lats.min(),
+        east=lons_180.max(), north=lats.max(),
+        width=width, height=height,
     )
 
+    # GFS latitude ordering: if north-first, rasterio is happy; else flip
+    work_score = score.copy()
+    work_t     = t.copy()
+    work_rhi   = rh_ice.copy()
+    if lats[0] < lats[-1]:
+        work_score = work_score[::-1, :]
+        work_t     = work_t[::-1, :]
+        work_rhi   = work_rhi[::-1, :]
 
-# ── Parse GFS GRIB2 with cfgrib ───────────────────────────────────────────
-def extract_issr_cells(grib_path: str) -> list[dict]:
-    import cfgrib  # type: ignore
-    import numpy as np
+    # Reorder longitudes from 0-360 to -180..180
+    if lons.max() > 180:
+        split = np.searchsorted(lons, 180)
+        work_score = np.concatenate([work_score[:, split:], work_score[:, :split]], axis=1)
+        work_t     = np.concatenate([work_t[:, split:],     work_t[:, :split]],     axis=1)
+        work_rhi   = np.concatenate([work_rhi[:, split:],   work_rhi[:, :split]],   axis=1)
 
-    logger.info("Opening GRIB2: %s", grib_path)
-    datasets = cfgrib.open_datasets(grib_path, backend_kwargs={"indexing_time": None})
-
-    t_ds = next(
-        (d for d in datasets if "t" in d.data_vars and "isobaricInhPa" in d.dims), None
-    )
-    r_ds = next(
-        (d for d in datasets if "r" in d.data_vars and "isobaricInhPa" in d.dims), None
-    )
-
-    if t_ds is None or r_ds is None:
-        logger.error("Missing temperature or humidity variables in GRIB2.")
-        raise ValueError("GRIB2 missing expected variables (t, r at isobaricInhPa)")
-
-    t_sel = t_ds.sel(isobaricInhPa=PRESSURE_HPA, method="nearest")["t"]
-    r_sel = r_ds.sel(isobaricInhPa=PRESSURE_HPA, method="nearest")["r"]
-
-    lats = t_sel.latitude.values
-    lons = t_sel.longitude.values
-    T_arr = t_sel.values
-    R_arr = r_sel.values
-
-    cells: list[dict] = []
-    for i, lat in enumerate(lats):
-        if not (24.0 <= float(lat) <= 55.0):
-            continue
-        for j, lon_raw in enumerate(lons):
-            lon = float(lon_raw) if lon_raw <= 180 else float(lon_raw) - 360.0
-            if not (-130.0 <= lon <= -60.0):
-                continue
-            T_K = float(T_arr[i, j])
-            rhi = rhl_to_rhi(float(R_arr[i, j]), T_K)
-            sac = schmidt_appleman(T_K, PRESSURE_HPA, rhi)
-            risk = float(np.clip((rhi - 0.9) * 2.5, 0.0, 1.0)) if sac else 0.0
-            if risk > 0.05:
-                cells.append(
-                    {
-                        "lat": float(lat),
-                        "lon": lon,
-                        "T_K": T_K,
-                        "rhi": rhi,
-                        "risk_score": risk,
-                    }
-                )
-    logger.info("Extracted %d ISSR-positive cells.", len(cells))
-    return cells
-
-
-# ── Cluster cells into GeoJSON polygons ───────────────────────────────────
-def cells_to_features(cells: list[dict], valid_time: str) -> list[dict]:
-    step = 0.25  # GFS 0.25° grid
-    half = step / 2.0
+    THRESHOLD = 0.05
+    altitude_ft = altitude_ft_from_hpa(PRESSURE_HPA)
     features = []
 
-    buckets: dict[str, list[dict]] = {"high": [], "medium": [], "low": []}
-    for c in cells:
-        if c["risk_score"] >= 0.7:
-            buckets["high"].append(c)
-        elif c["risk_score"] >= 0.4:
-            buckets["medium"].append(c)
-        else:
-            buckets["low"].append(c)
+    # Single mask: any pixel above threshold gets a polygon shape
+    mask = (work_score > THRESHOLD).astype(np.uint8)
 
-    try:
-        from shapely.geometry import mapping, Polygon as SP  # type: ignore
-        from shapely.ops import unary_union  # type: ignore
-
-        use_shapely = True
-    except ImportError:
-        use_shapely = False
-
-    altitude_ft = int(44307.69 * (1.0 - (PRESSURE_HPA / 1013.25) ** 0.190284))
-
-    for risk_level, bucket in buckets.items():
-        if not bucket:
+    for geom_dict, _ in rasterio.features.shapes(mask, mask=mask, transform=transform):
+        poly = shape(geom_dict)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        poly = poly.simplify(simplify_tolerance, preserve_topology=True)
+        if poly.is_empty or poly.area < 0.01:
             continue
-        avg_T = sum(c["T_K"] for c in bucket) / len(bucket)
-        avg_rhi = sum(c["rhi"] for c in bucket) / len(bucket)
-        avg_score = sum(c["risk_score"] for c in bucket) / len(bucket)
 
-        if use_shapely:
-            polys = [
-                SP(
-                    [
-                        (c["lon"] - half, c["lat"] - half),
-                        (c["lon"] + half, c["lat"] - half),
-                        (c["lon"] + half, c["lat"] + half),
-                        (c["lon"] - half, c["lat"] + half),
-                    ]
-                )
-                for c in bucket
-            ]
-            merged = unary_union(polys)
-            geoms = list(merged.geoms) if merged.geom_type == "MultiPolygon" else [merged]
-            for geom in geoms:
-                if geom.area < 0.5:
-                    continue
-                area_km2 = int(geom.area * 111.32**2)
-                features.append(
-                    {
-                        "type": "Feature",
-                        "properties": {
-                            "risk_level": risk_level,
-                            "risk_score": round(avg_score, 3),
-                            "altitude_ft": altitude_ft,
-                            "temperature_k": round(avg_T, 1),
-                            "rhi": round(avg_rhi, 3),
-                            "area_km2": area_km2,
-                            "valid_time": valid_time,
-                            "label": f"{risk_level.capitalize()} contrail risk zone",
-                        },
-                        "geometry": mapping(geom),
-                    }
-                )
+        # Sample continuous score from pixels in this polygon's bbox
+        bounds = poly.bounds
+        lon_mask = (lons_180 >= bounds[0]) & (lons_180 <= bounds[2])
+        lat_mask = (lats     >= bounds[1]) & (lats     <= bounds[3])
+        region_score = score[np.ix_(lat_mask, lon_mask)] if lat_mask.any() and lon_mask.any() else np.array([])
+        region_rhi   = rh_ice[np.ix_(lat_mask, lon_mask)] if lat_mask.any() and lon_mask.any() else np.array([])
+        region_t     = t[np.ix_(lat_mask, lon_mask)] if lat_mask.any() and lon_mask.any() else np.array([])
+
+        active = region_score[region_score > THRESHOLD]
+        mean_score = float(active.mean()) if active.size > 0 else float(score[score > THRESHOLD].mean())
+        avg_rhi    = float(region_rhi.mean()) if region_rhi.size > 0 else float(rh_ice.mean())
+        avg_T      = float(region_t.mean())   if region_t.size   > 0 else float(t.mean())
+
+        # Derive categorical label from continuous score
+        if mean_score >= 0.6:
+            label, risk_level, intensity = "persistent", "high",   1.0
+        elif mean_score >= 0.3:
+            label, risk_level, intensity = "persistent", "medium", 0.7
         else:
-            lats = [c["lat"] for c in bucket]
-            lons = [c["lon"] for c in bucket]
-            lat_min, lat_max = min(lats) - half, max(lats) + half
-            lon_min, lon_max = min(lons) - half, max(lons) + half
-            area_km2 = int((lat_max - lat_min) * (lon_max - lon_min) * 111.32**2)
-            features.append(
-                {
-                    "type": "Feature",
-                    "properties": {
-                        "risk_level": risk_level,
-                        "risk_score": round(avg_score, 3),
-                        "altitude_ft": altitude_ft,
-                        "temperature_k": round(avg_T, 1),
-                        "rhi": round(avg_rhi, 3),
-                        "area_km2": area_km2,
-                        "valid_time": valid_time,
-                        "label": f"{risk_level.capitalize()} contrail risk zone",
-                    },
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [
-                            [
-                                [lon_min, lat_min],
-                                [lon_max, lat_min],
-                                [lon_max, lat_max],
-                                [lon_min, lat_max],
-                                [lon_min, lat_min],
-                            ]
-                        ],
-                    },
-                }
-            )
+            label, risk_level, intensity = "short",      "low",    0.5
+
+        features.append({
+            "type": "Feature",
+            "geometry": mapping(poly),
+            "properties": {
+                "intensity":     round(intensity, 2),
+                "label":         label,
+                "risk_level":    risk_level,
+                "risk_score":    round(mean_score, 3),
+                "altitude_ft":   altitude_ft,
+                "temperature_k": round(avg_T, 1),
+                "rhi":           round(avg_rhi, 3),
+                "area_km2":      int(poly.area * 111.32 ** 2),
+                "valid_time":    valid_time,
+            },
+        })
+
+    logger.info("Vectorised %d features (0.5: short-lived, 1.0: persistent)", len(features))
     return features
 
 
 # ── Lambda entry point ────────────────────────────────────────────────────
-def handler(event: dict, context: object) -> dict:
+
+def lambda_handler(event: dict, context: object) -> dict:
     logger.info("Predict Lambda invoked. Event: %s", json.dumps(event))
     s3 = boto3.client("s3")
-    cf = boto3.client("cloudfront") if CF_DIST_ID else None
 
-    # Parse S3 trigger
-    record = event["Records"][0]["s3"]
-    bucket = record["bucket"]["name"]
-    key = record["object"]["key"]  # scenes/<scene_id>/manifest.json
-    logger.info("Triggered by s3://%s/%s", bucket, key)
+    # ── Parse S3 trigger ─────────────────────────────────────────────────
+    record  = event["Records"][0]["s3"]
+    src_key = record["object"]["key"]   # e.g. runs/20260516T12.grib2
+    logger.info("Processing s3://%s/%s", S3_SRC_BUCKET, src_key)
 
-    # Read manifest
-    manifest_obj = s3.get_object(Bucket=bucket, Key=key)
-    manifest = json.loads(manifest_obj["Body"].read())
-    scene_id = manifest["scene_id"]
-    grib2_key = manifest["grib2_key"]
-    valid_time = manifest.get("ingested_at", datetime.now(timezone.utc).isoformat())
-    logger.info("Processing scene: %s", scene_id)
+    # Derive run ID from key: runs/20260516T12.grib2 → 20260516T12
+    run_id = Path(src_key).stem           # "20260516T12"
+    valid_time = datetime.now(timezone.utc).isoformat()
 
-    # Download GRIB2 to /tmp
+    # ── Download GRIB2 ───────────────────────────────────────────────────
     with tempfile.NamedTemporaryFile(suffix=".grib2", delete=False) as tmp:
         tmp_path = tmp.name
-    logger.info("Downloading s3://%s/%s → %s", INPUT_BUCKET, grib2_key, tmp_path)
-    s3.download_file(INPUT_BUCKET, grib2_key, tmp_path)
+    logger.info("Downloading to %s", tmp_path)
+    s3.download_file(S3_SRC_BUCKET, src_key, tmp_path)
 
     try:
-        cells = extract_issr_cells(tmp_path)
+        # ── Read GFS with cfgrib ──────────────────────────────────────────
+        logger.info("Reading GFS GRIB2 at %s hPa…", PRESSURE_HPA)
+        ds_t = xr.open_dataset(
+            tmp_path, engine="cfgrib",
+            filter_by_keys={"typeOfLevel": "isobaricInhPa", "shortName": "t"},
+        )
+        ds_r = xr.open_dataset(
+            tmp_path, engine="cfgrib",
+            filter_by_keys={"typeOfLevel": "isobaricInhPa", "shortName": "r"},
+        )
+
+        t_arr   = ds_t["t"].sel(isobaricInhPa=PRESSURE_HPA).values
+        r_arr   = ds_r["r"].sel(isobaricInhPa=PRESSURE_HPA).values
+        lats    = ds_t["latitude"].values
+        lons    = ds_t["longitude"].values
+
+        logger.info("Grid: %s, T range %.1f–%.1f K", t_arr.shape, t_arr.min(), t_arr.max())
+
+        # ── Score + vectorise ─────────────────────────────────────────────
+        score, rh_ice = compute_contrail_score(t_arr, r_arr)
+        logger.info("Persistent pixels: %d, short: %d",
+                    (score == 1.0).sum(), (score == 0.5).sum())
+
+        features = score_to_features(score, rh_ice, t_arr, lats, lons, valid_time)
+
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    features = cells_to_features(cells, valid_time)
-    logger.info("Produced %d GeoJSON features.", len(features))
-
+    # ── Build GeoJSON ─────────────────────────────────────────────────────
     geojson = {
         "type": "FeatureCollection",
         "metadata": {
-            "generated": datetime.now(timezone.utc).isoformat(),
-            "forecast_valid": valid_time,
+            "generated":       datetime.now(timezone.utc).isoformat(),
+            "forecast_valid":  valid_time,
             "forecast_source": "GFS 0.25°",
-            "pressure_hpa": PRESSURE_HPA,
-            "model": "pycontrails CoCiP + Schmidt–Appleman",
-            "scene_id": scene_id,
+            "pressure_hpa":    PRESSURE_HPA,
+            "model":           "Schmidt–Appleman + ISSR (predict_local algorithm)",
+            "run_id":          run_id,
         },
         "features": features,
     }
     body = json.dumps(geojson)
 
-    # Write scene-specific output
-    scene_key = f"scenes/{scene_id}/contrails.geojson"
+    # ── Write run-specific output ──────────────────────────────────────────
+    run_key = f"runs/{run_id}/contrails.geojson"
     s3.put_object(
-        Bucket=OUTPUT_BUCKET,
-        Key=scene_key,
-        Body=body,
-        ContentType="application/geo+json",
-        CacheControl="max-age=21600",  # 6 h
+        Bucket=S3_DST_BUCKET, Key=run_key,
+        Body=body, ContentType="application/geo+json",
+        CacheControl="max-age=21600",
     )
-    logger.info("Wrote s3://%s/%s", OUTPUT_BUCKET, scene_key)
+    logger.info("Wrote s3://%s/%s", S3_DST_BUCKET, run_key)
 
-    # Overwrite latest.geojson
+    # ── Overwrite latest.geojson ──────────────────────────────────────────
     s3.put_object(
-        Bucket=OUTPUT_BUCKET,
-        Key="latest.geojson",
-        Body=body,
-        ContentType="application/geo+json",
-        CacheControl="max-age=300",  # 5 min so frontend refreshes quickly
+        Bucket=S3_DST_BUCKET, Key="latest.geojson",
+        Body=body, ContentType="application/geo+json",
+        CacheControl="max-age=300",
     )
     logger.info("Updated latest.geojson")
 
-    # Invalidate CloudFront cache for /latest.geojson
-    if cf and CF_DIST_ID:
-        cf.create_invalidation(
+    # ── CloudFront invalidation ───────────────────────────────────────────
+    if CF_DIST_ID:
+        boto3.client("cloudfront").create_invalidation(
             DistributionId=CF_DIST_ID,
             InvalidationBatch={
                 "Paths": {"Quantity": 1, "Items": ["/latest.geojson"]},
-                "CallerReference": scene_id,
+                "CallerReference": run_id,
             },
         )
-        logger.info("CloudFront invalidation requested for /latest.geojson")
+        logger.info("CloudFront invalidation requested.")
 
     return {
         "statusCode": 200,
-        "scene_id": scene_id,
+        "run_id": run_id,
         "feature_count": len(features),
-        "output_key": scene_key,
+        "output_key": run_key,
     }
+
+
+# Alias so both handler.handler and handler.lambda_handler work
+handler = lambda_handler

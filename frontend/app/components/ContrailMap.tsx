@@ -16,14 +16,24 @@ export interface Airport {
 }
 
 export interface ContrailFeature {
-  risk_level: "low" | "medium" | "high";
-  risk_score: number;
-  altitude_ft: number;
-  temperature_k: number;
-  rhi: number;
-  area_km2: number;
-  valid_time: string;
-  label: string;
+  // Core schema from predict_local.py / predict Lambda
+  intensity?: number;          // 0.5 = short-lived, 1.0 = persistent
+  label?: string;              // "short" | "persistent"
+  // Enriched schema added by predict Lambda (and used in demo data)
+  risk_level?: "low" | "medium" | "high";
+  risk_score?: number;
+  altitude_ft?: number;
+  temperature_k?: number;
+  rhi?: number;
+  area_km2?: number;
+  valid_time?: string;
+}
+
+/** Normalise either schema into a unified risk score 0→1. */
+export function featureRiskScore(f: ContrailFeature): number {
+  if (f.risk_score !== undefined) return f.risk_score;
+  if (f.intensity   !== undefined) return f.intensity;   // 0.5 or 1.0
+  return 0;
 }
 
 export interface AircraftType {
@@ -62,12 +72,22 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
   },
 ];
 
-// ── Risk colour palette (purple → amber → red) ────────────────────────────
-const RISK_STYLE: Record<string, { color: string; fillColor: string; fillOpacity: number }> = {
-  low: { color: "#7c3aed", fillColor: "#7c3aed", fillOpacity: 0.22 },
-  medium: { color: "#f59e0b", fillColor: "#f59e0b", fillOpacity: 0.32 },
-  high: { color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.45 },
-};
+// ── Rainbow colour scale (blue → cyan → green → yellow → orange → red) ───
+// Maps a risk_score in [0, 1] to an HSL hue: 240 (blue) → 0 (red).
+export function riskScoreToHex(score: number): string {
+  const s = Math.max(0, Math.min(1, score));
+  const hue = Math.round((1 - s) * 240); // 240 = blue, 0 = red
+  // Increase saturation and lightness slightly toward red for vibrancy
+  const sat = 85 + Math.round(s * 10);
+  const lit = 52 + Math.round((1 - s) * 10);
+  return `hsl(${hue}, ${sat}%, ${lit}%)`;
+}
+
+function riskStyle(score: number) {
+  const color = riskScoreToHex(score);
+  const fillOpacity = 0.2 + score * 0.35; // 0.20 (low) → 0.55 (high)
+  return { color, fillColor: color, fillOpacity, weight: 1.5 };
+}
 
 // ── Great-circle intermediate points ──────────────────────────────────────
 function greatCirclePoints(
@@ -185,25 +205,28 @@ export default function ContrailMap() {
         setGeojsonMeta(gj.metadata ?? {});
         const layer = L.geoJSON(gj, {
           style: (feature) => {
-            const risk = feature?.properties?.risk_level ?? "low";
-            return {
-              ...RISK_STYLE[risk],
-              weight: 1.5,
-            };
+            const props = feature?.properties as ContrailFeature | undefined;
+            const score = props ? featureRiskScore(props) : 0;
+            return riskStyle(score);
           },
           onEachFeature: (feature, lyr) => {
             lyr.on("click", () => {
               setPopupData(feature.properties as ContrailFeature);
             });
             lyr.on("mouseover", () => {
-              (lyr as L.Path).setStyle({ fillOpacity: 0.65, weight: 2.5 });
+              const props = feature?.properties as ContrailFeature | undefined;
+              const score = props ? featureRiskScore(props) : 0;
+              const base = riskStyle(score);
+              (lyr as L.Path).setStyle({
+                ...base,
+                fillOpacity: Math.min(base.fillOpacity + 0.25, 0.85),
+                weight: 2.5,
+              });
             });
             lyr.on("mouseout", () => {
-              const risk = feature.properties?.risk_level ?? "low";
-              (lyr as L.Path).setStyle({
-                ...RISK_STYLE[risk],
-                weight: 1.5,
-              });
+              const props = feature?.properties as ContrailFeature | undefined;
+              const score = props ? featureRiskScore(props) : 0;
+              (lyr as L.Path).setStyle(riskStyle(score));
             });
           },
         });
@@ -345,25 +368,25 @@ export default function ContrailMap() {
         <div ref={mapDivRef} className="h-full w-full" />
 
         {/* ── Legend ─────────────────────────────────────────────────── */}
-        <div className="absolute bottom-6 right-4 z-[500] rounded-xl border border-slate-700 bg-slate-900/90 px-4 py-3 backdrop-blur-sm">
+        <div className="absolute bottom-6 right-4 z-[500] rounded-xl border border-slate-700 bg-slate-900/90 px-4 py-3 backdrop-blur-sm w-40">
           <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
             Contrail Risk
           </p>
-          {[
-            { label: "High", color: "#ef4444" },
-            { label: "Medium", color: "#f59e0b" },
-            { label: "Low", color: "#7c3aed" },
-          ].map(({ label, color }) => (
-            <div key={label} className="flex items-center gap-2 mb-1">
-              <div
-                className="h-3 w-3 rounded-sm"
-                style={{ background: color, opacity: 0.85 }}
-              />
-              <span className="text-xs text-slate-300">{label}</span>
-            </div>
-          ))}
-          <div className="mt-2 border-t border-slate-700 pt-2 flex items-center gap-2">
-            <div className="h-0.5 w-6 bg-sky-400" style={{ borderTop: "2px dashed #38bdf8" }} />
+          {/* Rainbow gradient bar */}
+          <div
+            className="h-3 w-full rounded-sm mb-1"
+            style={{
+              background:
+                "linear-gradient(to right, hsl(240,85%,57%), hsl(180,85%,52%), hsl(120,85%,52%), hsl(60,95%,52%), hsl(30,95%,55%), hsl(0,95%,57%))",
+            }}
+          />
+          <div className="flex justify-between text-[10px] text-slate-400 mb-3">
+            <span>Low</span>
+            <span>Medium</span>
+            <span>High</span>
+          </div>
+          <div className="border-t border-slate-700 pt-2 flex items-center gap-2">
+            <div className="h-0.5 w-6" style={{ borderTop: "2px dashed #38bdf8" }} />
             <span className="text-xs text-slate-300">Flight Route</span>
           </div>
         </div>

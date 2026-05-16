@@ -21,9 +21,26 @@ import rasterio.features
 
 
 def compute_contrail_score(grib_path, pressure_level=250):
-    """Return (score, lats, lons) for the chosen pressure level.
-    Score: 0=no contrail, 0.5=short, 1.0=persistent."""
+    """
+    Return (score, rh_ice, lats, lons) for the chosen pressure level.
 
+    score is now a CONTINUOUS value in [0, 1] — not binary — built from
+    two physically-grounded factors:
+
+      cold_factor  = clip((233 - T) / 20, 0, 1)
+                     0 at the SAC threshold (233 K), 1 at very cold cruise air (~213 K)
+
+      rhi_factor   = clip((RHi - 0.7) / 0.6, 0, 1)
+                     0 at dry conditions (RHi = 0.7),
+                     0.5 at saturation (RHi = 1.0, contrail just persists),
+                     1.0 at strongly supersaturated (RHi = 1.3+)
+
+      score = cold_factor × rhi_factor
+              (both conditions must be met; product ensures they compound)
+
+    This maps naturally to the rainbow: blue (low, barely possible) through
+    green/yellow (moderate, short-lived) to orange/red (high, strongly persistent).
+    """
     print(f"Opening {grib_path}...")
 
     ds_t = xr.open_dataset(
@@ -38,93 +55,118 @@ def compute_contrail_score(grib_path, pressure_level=250):
     )
 
     t = ds_t["t"].sel(isobaricInhPa=pressure_level).values  # Kelvin
-    r = ds_r["r"].sel(isobaricInhPa=pressure_level).values  # percent (over water)
+    r = ds_r["r"].sel(isobaricInhPa=pressure_level).values  # % over water
     lats = ds_t["latitude"].values
     lons = ds_t["longitude"].values
 
-    # Saturation vapor pressures (Pa)
-    e_sat_ice = 611.21 * np.exp(22.587 * (t - 273.15) / (t - 0.7))
+    # Saturation vapor pressures (Pa) — Magnus–Tetens
+    e_sat_ice   = 611.21 * np.exp(22.587 * (t - 273.15) / (t - 0.7))
     e_sat_water = 611.21 * np.exp(17.502 * (t - 273.15) / (t - 32.18))
 
-    # Convert RH (over water) -> RH (over ice)
+    # RH over water → RH over ice
     rh_ice = (r / 100.0) * (e_sat_water / e_sat_ice)
 
-    # Score
-    cold_enough = t < 233.0
-    persistent = rh_ice > 1.0
-    score = np.zeros_like(t, dtype=np.float32)
-    score[cold_enough] = 0.5
-    score[cold_enough & persistent] = 1.0
+    # Continuous factors
+    cold_factor = np.clip((233.0 - t) / 20.0, 0.0, 1.0)   # 0 at 233 K, 1 at 213 K
+    rhi_factor  = np.clip((rh_ice - 0.7) / 0.6, 0.0, 1.0)  # 0 at 0.7, 1 at 1.3+
 
-    print(f"  Persistent contrail pixels: {(score == 1.0).sum():,}")
-    print(f"  Short contrail pixels: {(score == 0.5).sum():,}")
+    # Only score where the SAC necessary condition is met (T < 233 K)
+    score = np.where(t < 233.0, cold_factor * rhi_factor, 0.0).astype(np.float32)
 
-    return score, lats, lons
+    print(f"  Score range: {score[score > 0].min():.3f} – {score.max():.3f}")
+    print(f"  Pixels with any risk (score > 0.05): {(score > 0.05).sum():,}")
+    print(f"  High risk pixels (score > 0.7):      {(score > 0.70).sum():,}")
+
+    return score, rh_ice, lats, lons
 
 
-def score_to_geojson(score, lats, lons, simplify_tolerance=0.5):
-    """Convert score raster to GeoJSON polygons.
-    simplify_tolerance: degrees, larger = fewer vertices."""
+def score_to_geojson(score, rh_ice, lats, lons, simplify_tolerance=0.5, threshold=0.05):
+    """
+    Convert continuous score raster to GeoJSON polygons.
 
+    Each polygon's risk_score is the mean continuous score of pixels inside it,
+    NOT a binary bin — so the rainbow spans the full 0→1 range.
+    """
     print("Building polygons...")
 
-    # GFS longitudes go 0-360. Convert to -180..180 for standard GeoJSON.
     lons_180 = np.where(lons > 180, lons - 360, lons)
 
-    # rasterio.features.shapes needs a 2D uint8 array + an affine transform.
-    # Build transform from lat/lon grid (0.25 deg resolution).
     from rasterio.transform import from_bounds
     height, width = score.shape
     transform = from_bounds(
-        west=lons_180.min(),
-        south=lats.min(),
-        east=lons_180.max(),
-        north=lats.max(),
-        width=width,
-        height=height,
+        west=lons_180.min(), south=lats.min(),
+        east=lons_180.max(), north=lats.max(),
+        width=width, height=height,
     )
 
-    # GFS data is north-to-south in latitudes; rasterio expects top-to-bottom.
-    # If lats[0] > lats[-1] (north first), we're good. Otherwise flip.
+    # Align grid orientation
+    work_score = score.copy()
+    work_rhi   = rh_ice.copy()
     if lats[0] < lats[-1]:
-        score = score[::-1, :]
+        work_score = work_score[::-1, :]
+        work_rhi   = work_rhi[::-1, :]
 
-    # Roll longitudes so the array goes -180 to 180 instead of 0 to 360
     if lons.max() > 180:
         split_idx = np.searchsorted(lons, 180)
-        score = np.concatenate([score[:, split_idx:], score[:, :split_idx]], axis=1)
+        work_score = np.concatenate([work_score[:, split_idx:], work_score[:, :split_idx]], axis=1)
+        work_rhi   = np.concatenate([work_rhi[:, split_idx:],   work_rhi[:, :split_idx]],   axis=1)
+
+    # Single binary mask: any pixel with score > threshold gets a polygon
+    mask = (work_score > threshold).astype(np.uint8)
 
     features = []
-    for level_value in [0.5, 1.0]:
-        mask = (score == level_value).astype(np.uint8)
-        if mask.sum() == 0:
+    for geom_dict, _ in rasterio.features.shapes(mask, mask=mask, transform=transform):
+        poly = shape(geom_dict)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        poly = poly.simplify(simplify_tolerance, preserve_topology=True)
+        if poly.is_empty:
             continue
 
-        for geom_dict, val in rasterio.features.shapes(mask, mask=mask > 0, transform=transform):
-            poly = shape(geom_dict)
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-            poly = poly.simplify(simplify_tolerance, preserve_topology=True)
-            if poly.is_empty:
-                continue
+        # Sample pixels inside this polygon's bounding box to get mean score
+        bounds = poly.bounds  # (minx, miny, maxx, maxy) in lon/lat
+        col_mask = (lons_180 >= bounds[0]) & (lons_180 <= bounds[2])
+        row_mask = (lats    >= bounds[1]) & (lats    <= bounds[3])
+        region_score = score[np.ix_(row_mask, col_mask)] if row_mask.any() and col_mask.any() else np.array([])
+        region_rhi   = rh_ice[np.ix_(row_mask, col_mask)] if row_mask.any() and col_mask.any() else np.array([])
 
-            features.append({
-                "type": "Feature",
-                "geometry": mapping(poly),
-                "properties": {
-                    "intensity": float(level_value),
-                    "label": "persistent" if level_value == 1.0 else "short",
-                },
-            })
+        mean_score = float(region_score[region_score > threshold].mean()) \
+                     if region_score.size > 0 and (region_score > threshold).any() \
+                     else float(score[score > threshold].mean())
+        mean_rhi   = float(region_rhi.mean()) if region_rhi.size > 0 else 0.0
 
-    geojson = {"type": "FeatureCollection", "features": features}
+        # Derive categorical label from continuous score
+        if mean_score >= 0.6:
+            label, risk_level, intensity = "persistent", "high",   1.0
+        elif mean_score >= 0.3:
+            label, risk_level, intensity = "persistent", "medium",  0.7
+        else:
+            label, risk_level, intensity = "short",      "low",    0.5
+
+        features.append({
+            "type": "Feature",
+            "geometry": mapping(poly),
+            "properties": {
+                "intensity":   round(intensity, 2),
+                "label":       label,
+                "risk_level":  risk_level,
+                "risk_score":  round(mean_score, 3),
+                "rhi":         round(mean_rhi, 3),
+                "altitude_ft": 34000,
+                "area_km2":    int(poly.area * 111.32 ** 2),
+            },
+        })
+
     print(f"  Total features: {len(features)}")
-    return geojson
+    score_vals = [f["properties"]["risk_score"] for f in features]
+    if score_vals:
+        print(f"  Risk score range: {min(score_vals):.3f} – {max(score_vals):.3f}")
+    return {"type": "FeatureCollection", "features": features}
 
 
 def main(grib_path, output_path):
-    score, lats, lons = compute_contrail_score(grib_path)
-    geojson = score_to_geojson(score, lats, lons)
+    score, rh_ice, lats, lons = compute_contrail_score(grib_path)
+    geojson = score_to_geojson(score, rh_ice, lats, lons)
 
     with open(output_path, "w") as f:
         json.dump(geojson, f)
