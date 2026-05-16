@@ -139,6 +139,20 @@ function haversineKm(a: Airport, b: Airport): number {
   return R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
 }
 
+// ── Point-in-polygon (ray casting) ────────────────────────────────────────
+// ring: array of [lon, lat] pairs (GeoJSON order)
+function pointInRing(lon: number, lat: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 // ── Airport marker icon ───────────────────────────────────────────────────
 const airportIcon = (selected: boolean) =>
   L.divIcon({
@@ -210,6 +224,11 @@ export default function ContrailMap() {
             return riskStyle(score);
           },
           onEachFeature: (feature, lyr) => {
+            // Store the outer ring coordinates for accurate point-in-polygon tests
+            const geom = feature.geometry as { type: string; coordinates: [number, number][][] };
+            if (geom.type === "Polygon") {
+              (lyr as L.Layer & { _ring?: [number, number][] })._ring = geom.coordinates[0];
+            }
             lyr.on("click", () => {
               setPopupData(feature.properties as ContrailFeature);
             });
@@ -322,19 +341,21 @@ export default function ContrailMap() {
         .addTo(rl);
     });
 
-    // Estimate km of route inside risk polygons (rough heuristic)
+    // Estimate km of route inside risk polygons using point-in-polygon.
+    // Each route point is tested against actual polygon rings — not bounding boxes —
+    // so overlapping polygons and large sparse polygons don't inflate the number.
     const gjLayer = geojsonLayerRef.current;
     if (gjLayer) {
-      let riskKm = 0;
+      const inRisk = new Array(pts.length).fill(false);
       gjLayer.eachLayer((l) => {
-        if (!(l instanceof L.Polygon)) return;
-        const bounds = l.getBounds();
-        const routePts = pts.filter(
-          ([lat, lon]) => bounds.contains([lat, lon])
-        );
-        riskKm += (routePts.length / pts.length) * totalKm;
+        const ring = (l as L.Layer & { _ring?: [number, number][] })._ring;
+        if (!ring) return;
+        pts.forEach(([lat, lon], i) => {
+          if (!inRisk[i] && pointInRing(lon, lat, ring)) inRisk[i] = true;
+        });
       });
-      setRouteRiskKm(Math.round(riskKm));
+      const riskFraction = inRisk.filter(Boolean).length / pts.length;
+      setRouteRiskKm(Math.round(Math.min(riskFraction, 1) * totalKm));
     }
 
     // Fly map to route bounds

@@ -80,7 +80,7 @@ def compute_contrail_score(grib_path, pressure_level=250):
     return score, rh_ice, lats, lons
 
 
-def score_to_geojson(score, rh_ice, lats, lons, simplify_tolerance=0.5, threshold=0.05):
+def score_to_geojson(score, rh_ice, lats, lons, simplify_tolerance=0.15, threshold=0.05):
     """
     Convert continuous score raster to GeoJSON polygons.
 
@@ -120,7 +120,7 @@ def score_to_geojson(score, rh_ice, lats, lons, simplify_tolerance=0.5, threshol
         if not poly.is_valid:
             poly = poly.buffer(0)
         poly = poly.simplify(simplify_tolerance, preserve_topology=True)
-        if poly.is_empty:
+        if poly.is_empty or poly.area * 111.32 ** 2 < 400:  # skip < ~400 km² (1-2 pixel noise)
             continue
 
         # Sample pixels inside this polygon's bounding box to get mean score
@@ -152,7 +152,7 @@ def score_to_geojson(score, rh_ice, lats, lons, simplify_tolerance=0.5, threshol
                 "risk_level":  risk_level,
                 "risk_score":  round(mean_score, 3),
                 "rhi":         round(mean_rhi, 3),
-                "altitude_ft": 34000,
+                "altitude_ft": int(44307.69 * (1.0 - (pressure_level / 1013.25) ** 0.190284) * 3.28084),
                 "area_km2":    int(poly.area * 111.32 ** 2),
             },
         })

@@ -59,7 +59,9 @@ def compute_contrail_score(t: np.ndarray, r: np.ndarray) -> tuple[np.ndarray, np
 
 
 def altitude_ft_from_hpa(p: float) -> int:
-    return int(44307.69 * (1.0 - (p / 1013.25) ** 0.190284))
+    """ISA hypsometric formula — result in metres × 3.28084 → feet."""
+    metres = 44307.69 * (1.0 - (p / 1013.25) ** 0.190284)
+    return int(metres * 3.28084)
 
 
 # ── Rasterio vectorisation (mirrors predict_local.py) ─────────────────────
@@ -71,7 +73,7 @@ def score_to_features(
     lats: np.ndarray,
     lons: np.ndarray,
     valid_time: str,
-    simplify_tolerance: float = 0.5,
+    simplify_tolerance: float = 0.15,
 ) -> list[dict]:
     import rasterio.features
     from rasterio.transform import from_bounds
@@ -116,7 +118,7 @@ def score_to_features(
         if not poly.is_valid:
             poly = poly.buffer(0)
         poly = poly.simplify(simplify_tolerance, preserve_topology=True)
-        if poly.is_empty or poly.area < 0.01:
+        if poly.is_empty or poly.area * 111.32 ** 2 < 400:  # skip < ~400 km² (1-2 pixel noise)
             continue
 
         # Sample continuous score from pixels in this polygon's bbox
