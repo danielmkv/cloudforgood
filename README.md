@@ -263,4 +263,3 @@ Create a CloudFront distribution:
 - Lee, D.S., et al. (2021). The contribution of global aviation to anthropogenic climate forcing.
   *Atmospheric Environment.*
 - [NOAA GFS open data on AWS](https://registry.opendata.aws/noaa-gfs-bdp-pds/)
-- [pycontrails — open contrail science library](https://py.contrails.earth/)
