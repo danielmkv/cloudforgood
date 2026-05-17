@@ -1,0 +1,7 @@
+boto3
+numpy
+xarray
+cfgrib
+eccodes
+rasterio
+shapely

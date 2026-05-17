@@ -72,21 +72,20 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
   },
 ];
 
-// ── Rainbow colour scale (blue → cyan → green → yellow → orange → red) ───
-// Maps a risk_score in [0, 1] to an HSL hue: 240 (blue) → 0 (red).
+// ── 5-tier palette: dark navy at low intensity, lightening through blues, yellow at the top.
+// Matches the predict Lambda's intensity steps (0.1, 0.25, 0.4, 0.6, 0.8).
 export function riskScoreToHex(score: number): string {
-  const s = Math.max(0, Math.min(1, score));
-  const hue = Math.round((1 - s) * 240); // 240 = blue, 0 = red
-  // Increase saturation and lightness slightly toward red for vibrancy
-  const sat = 85 + Math.round(s * 10);
-  const lit = 52 + Math.round((1 - s) * 10);
-  return `hsl(${hue}, ${sat}%, ${lit}%)`;
+  if (score < 0.175) return "#1c2e54"; // 0.10: deep navy, near basemap
+  if (score < 0.325) return "#2d5fa8"; // 0.25: navy
+  if (score < 0.500) return "#5b94d6"; // 0.40: blue
+  if (score < 0.700) return "#9bc8f0"; // 0.60: pale sky
+  return "#fde68a";                    // 0.80+: light yellow pop
 }
 
 function riskStyle(score: number) {
   const color = riskScoreToHex(score);
-  const fillOpacity = 0.2 + score * 0.35; // 0.20 (low) → 0.55 (high)
-  return { color, fillColor: color, fillOpacity, weight: 1.5 };
+  const fillOpacity = 0.22 + score * 0.4; // 0.26 (0.10) → 0.54 (0.80)
+  return { color, fillColor: color, fillOpacity, weight: 0, stroke: false };
 }
 
 // ── Great-circle intermediate points ──────────────────────────────────────
@@ -216,62 +215,65 @@ export default function ContrailMap() {
     routeLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
-    // Load GeoJSON overlay
-    fetch("/data/latest.geojson")
-      .then((r) => r.json())
-      .then((gj) => {
-        if (!alive) return;
-        setGeojsonMeta(gj.metadata ?? {});
+    // Load GeoJSON overlay from CloudFront, refreshed periodically.
+    const GEOJSON_URL = "https://d2i587kxonhi5h.cloudfront.net/latest.geojson";
+    const loadGeojson = () =>
+      fetch(GEOJSON_URL, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((gj) => {
+          if (!alive) return;
+          setGeojsonMeta(gj.metadata ?? {});
 
-        // Build a flat list of outer rings for point-in-polygon checks.
-        // Done here directly from the GeoJSON data — no Leaflet layer traversal needed.
-        const rings: [number, number][][] = [];
-        for (const feature of gj.features ?? []) {
-          const geom = feature.geometry;
-          if (geom?.type === "Polygon") {
-            rings.push(geom.coordinates[0] as [number, number][]);
-          } else if (geom?.type === "MultiPolygon") {
-            for (const poly of geom.coordinates as [number, number][][][]) {
-              rings.push(poly[0]);
+          const rings: [number, number][][] = [];
+          for (const feature of gj.features ?? []) {
+            const geom = feature.geometry;
+            if (geom?.type === "Polygon") {
+              rings.push(geom.coordinates[0] as [number, number][]);
+            } else if (geom?.type === "MultiPolygon") {
+              for (const poly of geom.coordinates as [number, number][][][]) {
+                rings.push(poly[0]);
+              }
             }
           }
-        }
-        riskRingsRef.current = rings;
-        setRingsReady(true); // triggers route effect to re-run if airports already selected
+          riskRingsRef.current = rings;
+          setRingsReady(true);
 
-        const layer = L.geoJSON(gj, {
-          style: (feature) => {
-            const props = feature?.properties as ContrailFeature | undefined;
-            const score = props ? featureRiskScore(props) : 0;
-            return riskStyle(score);
-          },
-          onEachFeature: (feature, lyr) => {
-            lyr.on("click", () => {
-              setPopupData(feature.properties as ContrailFeature);
-            });
-            lyr.on("mouseover", () => {
+          const layer = L.geoJSON(gj, {
+            style: (feature) => {
               const props = feature?.properties as ContrailFeature | undefined;
               const score = props ? featureRiskScore(props) : 0;
-              const base = riskStyle(score);
-              (lyr as L.Path).setStyle({
-                ...base,
-                fillOpacity: Math.min(base.fillOpacity + 0.25, 0.85),
-                weight: 2.5,
+              return riskStyle(score);
+            },
+            onEachFeature: (feature, lyr) => {
+              lyr.on("click", () => {
+                setPopupData(feature.properties as ContrailFeature);
               });
-            });
-            lyr.on("mouseout", () => {
-              const props = feature?.properties as ContrailFeature | undefined;
-              const score = props ? featureRiskScore(props) : 0;
-              (lyr as L.Path).setStyle(riskStyle(score));
-            });
-          },
-        });
-        if (alive) {
+              lyr.on("mouseover", () => {
+                const props = feature?.properties as ContrailFeature | undefined;
+                const score = props ? featureRiskScore(props) : 0;
+                const base = riskStyle(score);
+                (lyr as L.Path).setStyle({
+                  ...base,
+                  fillOpacity: Math.min(base.fillOpacity + 0.25, 0.85),
+                  weight: 2.5,
+                });
+              });
+              lyr.on("mouseout", () => {
+                const props = feature?.properties as ContrailFeature | undefined;
+                const score = props ? featureRiskScore(props) : 0;
+                (lyr as L.Path).setStyle(riskStyle(score));
+              });
+            },
+          });
+          if (!alive) return;
+          if (geojsonLayerRef.current) map.removeLayer(geojsonLayerRef.current);
           layer.addTo(map);
           geojsonLayerRef.current = layer;
-        }
-      })
-      .catch(console.error);
+        })
+        .catch(console.error);
+
+    loadGeojson();
+    const geojsonPollId = window.setInterval(loadGeojson, 5 * 60 * 1000);
 
     // Load airports
     fetch("/data/airports.json")
@@ -283,6 +285,7 @@ export default function ContrailMap() {
 
     return () => {
       alive = false;
+      window.clearInterval(geojsonPollId);
       map.remove();
       mapRef.current = null;
     };
@@ -406,25 +409,25 @@ export default function ContrailMap() {
         <div ref={mapDivRef} className="h-full w-full" />
 
         {/* ── Legend ─────────────────────────────────────────────────── */}
-        <div className="absolute bottom-6 right-4 z-[500] rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 shadow-lg w-40">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-800">
-            Contrail Risk
+        <div className="absolute bottom-6 right-4 z-[500] rounded-xl border border-neutral-800 bg-black/90 px-4 py-3 shadow-lg w-44">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-400">
+            Contrail Intensity
           </p>
-          <div
-            className="h-2.5 w-full rounded-full mb-1"
-            style={{
-              background:
-                "linear-gradient(to right, hsl(240,85%,57%), hsl(180,85%,52%), hsl(120,85%,52%), hsl(60,95%,52%), hsl(30,95%,55%), hsl(0,95%,57%))",
-            }}
-          />
-          <div className="flex justify-between text-[10px] text-slate-800 mb-3">
-            <span>Low</span>
-            <span>Med</span>
-            <span>High</span>
+          <div className="flex gap-px h-3 w-full rounded-sm overflow-hidden mb-1.5">
+            {[0.10, 0.25, 0.40, 0.60, 0.80].map((v) => (
+              <div key={v} className="flex-1" style={{ background: riskScoreToHex(v) }} />
+            ))}
           </div>
-          <div className="border-t border-slate-300 pt-2 flex items-center gap-2">
-            <div className="h-0.5 w-6" style={{ borderTop: "2px dashed #3b82f6" }} />
-            <span className="text-[11px] text-slate-800">Flight Route</span>
+          <div className="flex justify-between text-[10px] text-neutral-400 mb-3">
+            <span>0.1</span>
+            <span>0.25</span>
+            <span>0.4</span>
+            <span>0.6</span>
+            <span>0.8</span>
+          </div>
+          <div className="border-t border-neutral-800 pt-2 flex items-center gap-2">
+            <div className="h-0.5 w-6" style={{ borderTop: "2px dashed #60a5fa" }} />
+            <span className="text-[11px] text-neutral-400">Flight Route</span>
           </div>
         </div>
 

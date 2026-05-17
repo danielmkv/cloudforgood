@@ -10,8 +10,8 @@ interface Props {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between text-xs">
-      <span className="text-slate-600">{label}</span>
-      <span className="font-medium text-slate-700">{value}</span>
+      <span className="text-neutral-500">{label}</span>
+      <span className="font-medium text-neutral-200">{value}</span>
     </div>
   );
 }
@@ -44,7 +44,7 @@ export default function RiskPopup({ data, onClose }: Props) {
       : "—";
 
   return (
-    <div className="absolute top-4 right-4 z-[600] w-72 rounded-xl border border-slate-300 bg-slate-100 p-4 shadow-xl">
+    <div className="absolute top-4 right-4 z-[600] w-72 rounded-xl border border-neutral-800 bg-black/95 p-4 shadow-xl">
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div>
@@ -53,12 +53,12 @@ export default function RiskPopup({ data, onClose }: Props) {
             style={{
               color: accentColor,
               borderColor: accentColor,
-              background: `color-mix(in srgb, ${accentColor} 12%, transparent)`,
+              background: `color-mix(in srgb, ${accentColor} 18%, transparent)`,
             }}
           >
             {riskLabel} risk
           </span>
-          <p className="mt-1.5 text-sm font-semibold text-slate-800 leading-snug">
+          <p className="mt-1.5 text-sm font-semibold text-neutral-100 leading-snug">
             {data.label === "persistent"
               ? "Persistent contrail region"
               : data.label === "short"
@@ -68,7 +68,7 @@ export default function RiskPopup({ data, onClose }: Props) {
         </div>
         <button
           onClick={onClose}
-          className="ml-2 flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-slate-600 hover:text-slate-600 hover:bg-slate-200 transition-colors text-base leading-none"
+          className="ml-2 flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 transition-colors text-base leading-none"
         >
           ×
         </button>
@@ -77,12 +77,12 @@ export default function RiskPopup({ data, onClose }: Props) {
       {/* Risk score bar */}
       <div className="mb-3">
         <div className="flex justify-between mb-1">
-          <span className="text-xs text-slate-600">Risk Score</span>
-          <span className="text-xs font-bold text-slate-600">
+          <span className="text-xs text-neutral-500">Risk Score</span>
+          <span className="text-xs font-bold text-neutral-300">
             {(score * 100).toFixed(0)}%
           </span>
         </div>
-        <div className="h-1.5 w-full rounded-full bg-slate-200">
+        <div className="h-1.5 w-full rounded-full bg-neutral-800">
           <div
             className="h-1.5 rounded-full transition-all"
             style={{
@@ -94,7 +94,7 @@ export default function RiskPopup({ data, onClose }: Props) {
       </div>
 
       {/* Stats */}
-      <div className="space-y-2 border-t border-slate-200 pt-3">
+      <div className="space-y-2 border-t border-neutral-800 pt-3">
         <Row label="Type" value={isPersistent ? "Persistent (ISSR)" : "Short-lived"} />
         <Row label="Altitude" value={altDisplay} />
         <Row label="Temperature" value={tempC} />
@@ -104,7 +104,7 @@ export default function RiskPopup({ data, onClose }: Props) {
       </div>
 
       {/* Interpretation */}
-      <p className="mt-3 text-[11px] text-slate-600 leading-relaxed">
+      <p className="mt-3 text-[11px] text-neutral-500 leading-relaxed">
         {isPersistent
           ? "Ice-supersaturated air. Contrails will persist and spread into cirrus, contributing to warming."
           : "Below ice saturation. Contrails form but quickly sublimate — lower climate impact."}

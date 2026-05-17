@@ -17,7 +17,12 @@ body {
 
 /* Leaflet overrides — keep map controls clean on dark tiles */
 .leaflet-container {
-  background: #1e293b;
+  background: #0a1a3a;
+}
+
+/* Tint the grey Carto Dark basemap into deep navy without affecting overlays */
+.leaflet-tile-pane {
+  filter: sepia(1) hue-rotate(190deg) saturate(2.6) brightness(0.7);
 }
 
 .leaflet-popup-content-wrapper {
