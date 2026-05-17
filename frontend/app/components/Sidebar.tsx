@@ -42,37 +42,27 @@ function AirportSearch({
 
   return (
     <div className="relative">
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-slate-400">
+      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-slate-900">
         {label}
       </label>
       <input
-        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+        className="w-full rounded-lg border border-slate-300 bg-slate-200/50 px-3 py-2 text-sm text-slate-700 placeholder-gray-400 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
         placeholder={selected ? `${selected.code} — ${selected.name}` : "Search airport…"}
         value={selected && !open ? `${selected.code} — ${selected.name}` : query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => {
-          setOpen(true);
-          setQuery("");
-        }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => { setOpen(true); setQuery(""); }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
       />
       {open && filtered.length > 0 && (
-        <ul className="absolute z-[999] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl">
+        <ul className="absolute z-[999] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-300 bg-slate-100 shadow-lg">
           {filtered.map((ap) => (
             <li
               key={ap.code}
-              className="cursor-pointer px-3 py-2 text-sm hover:bg-slate-700"
-              onMouseDown={() => {
-                onSelect(ap);
-                setOpen(false);
-                setQuery("");
-              }}
+              className="cursor-pointer px-3 py-2 text-sm hover:bg-blue-100 transition-colors"
+              onMouseDown={() => { onSelect(ap); setOpen(false); setQuery(""); }}
             >
-              <span className="font-semibold text-sky-400">{ap.code}</span>
-              <span className="ml-2 text-slate-300">{ap.name}</span>
+              <span className="font-semibold text-blue-600">{ap.code}</span>
+              <span className="ml-2 text-slate-900">{ap.name}</span>
             </li>
           ))}
         </ul>
@@ -93,43 +83,53 @@ export default function Sidebar({
   geojsonMeta,
 }: Props) {
   return (
-    <aside className="flex h-full w-80 flex-shrink-0 flex-col border-r border-slate-800 bg-slate-900 overflow-y-auto">
+    <aside className="flex h-full w-80 flex-shrink-0 flex-col border-r border-slate-300 bg-slate-100 overflow-y-auto shadow-sm">
       {/* ── Header ────────────────────────────────────────────────────── */}
-      <div className="px-5 pt-6 pb-4 border-b border-slate-800">
-        <div className="flex items-center gap-2 mb-1">
-          <div className="h-2.5 w-2.5 rounded-full bg-sky-400 animate-pulse" />
-          <h1 className="text-lg font-bold tracking-tight text-white">ContrAI</h1>
+      <div className="px-5 pt-6 pb-4 border-b border-slate-200">
+        <div className="flex items-center gap-2.5 mb-1">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 shadow-sm">
+            <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 15l4-8 5 4 4-6 5 3" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-base font-bold tracking-tight text-slate-800 leading-none">ContrAI</h1>
+            <p className="text-[10px] text-slate-900 leading-none mt-0.5">Cloud For Good</p>
+          </div>
+          <span className="ml-auto flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-600 border border-green-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+            Live
+          </span>
         </div>
-        <p className="text-xs text-slate-400 leading-relaxed">
-          Contrail formation risk prediction powered by{" "}
-          <span className="text-sky-400">pycontrails</span> &amp; GFS weather data.
+        <p className="mt-2 text-xs text-slate-900 leading-relaxed">
+          Contrail formation risk powered by GFS weather data &amp; Schmidt–Appleman criterion.
         </p>
       </div>
 
       {/* ── Forecast metadata ─────────────────────────────────────────── */}
       {geojsonMeta.forecast_valid && (
-        <div className="mx-4 my-3 rounded-lg bg-slate-800/60 px-3 py-2 border border-slate-700">
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-1">
+        <div className="mx-4 my-3 rounded-lg bg-blue-100/70 px-3 py-2.5 border border-blue-200">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-500 mb-1.5">
             Forecast
           </p>
-          <p className="text-xs text-slate-300">
+          <p className="text-xs text-slate-900">
             Valid:{" "}
-            <span className="text-sky-300 font-medium">
+            <span className="text-blue-600 font-medium">
               {new Date(geojsonMeta.forecast_valid).toUTCString()}
             </span>
           </p>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-900 mt-0.5">
             Source: {geojsonMeta.forecast_source ?? "GFS 0.25°"}
           </p>
-          <p className="text-xs text-slate-400">
-            Model: {geojsonMeta.model ?? "CoCiP"}
+          <p className="text-xs text-slate-900">
+            Model: {geojsonMeta.model ?? "Schmidt–Appleman"}
           </p>
         </div>
       )}
 
       {/* ── Route planner ─────────────────────────────────────────────── */}
-      <div className="px-4 pt-2 pb-4 border-b border-slate-800 space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+      <div className="px-4 pt-2 pb-4 border-b border-slate-200 space-y-3">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-900">
           Route Planner
         </p>
         <AirportSearch
@@ -149,7 +149,7 @@ export default function Sidebar({
         {(origin || destination) && (
           <button
             onClick={onClear}
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 py-1.5 text-xs text-slate-400 hover:text-red-400 hover:border-red-800 transition-colors"
+            className="w-full rounded-lg border border-slate-300 bg-slate-200/50 py-1.5 text-xs text-slate-900 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-colors"
           >
             Clear route
           </button>
@@ -157,8 +157,8 @@ export default function Sidebar({
       </div>
 
       {/* ── Aircraft picker ───────────────────────────────────────────── */}
-      <div className="px-4 pt-3 pb-4 border-b border-slate-800">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
+      <div className="px-4 pt-3 pb-4 border-b border-slate-200">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-900">
           Aircraft Type
         </p>
         <div className="space-y-2">
@@ -166,16 +166,15 @@ export default function Sidebar({
             <button
               key={ac.id}
               onClick={() => onSelectAircraft(ac)}
-              className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+              className={`w-full rounded-lg border px-3 py-2.5 text-left text-xs transition-colors ${
                 aircraft.id === ac.id
-                  ? "border-sky-500 bg-sky-500/10 text-sky-300"
-                  : "border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600 hover:text-slate-200"
+                  ? "border-blue-300 bg-blue-100/70 text-blue-700"
+                  : "border-slate-300 bg-slate-100 text-slate-900 hover:border-gray-300 hover:bg-slate-200/50"
               }`}
             >
-              <span className="font-semibold block">{ac.label}</span>
-              <span className="text-[10px] text-slate-500">
-                Alt: {ac.cruise_alt_ft.toLocaleString()} ft · Fuel:{" "}
-                {ac.fuel_burn_kg_per_km} kg/km
+              <span className="font-semibold block text-[13px]">{ac.label}</span>
+              <span className={`text-[10px] ${aircraft.id === ac.id ? "text-blue-500" : "text-slate-900"}`}>
+                Alt: {ac.cruise_alt_ft.toLocaleString()} ft · Fuel: {ac.fuel_burn_kg_per_km} kg/km
               </span>
             </button>
           ))}
@@ -184,29 +183,29 @@ export default function Sidebar({
 
       {/* ── How it works ─────────────────────────────────────────────── */}
       <div className="px-4 pt-3 pb-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
+        <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-widest text-slate-900">
           How It Works
         </p>
-        <ol className="space-y-2">
+        <ol className="space-y-2.5">
           {[
             { n: "1", text: "GFS weather data fetched every 6 h from NOAA" },
-            { n: "2", text: "pycontrails CoCiP model evaluates ISSR conditions" },
+            { n: "2", text: "Schmidt–Appleman criterion evaluates ISSR conditions" },
             { n: "3", text: "Risk polygons published to S3 as GeoJSON" },
             { n: "4", text: "CloudFront delivers latest.geojson to this map" },
           ].map(({ n, text }) => (
-            <li key={n} className="flex gap-2 text-xs text-slate-400">
-              <span className="flex-shrink-0 h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold">
+            <li key={n} className="flex gap-2.5 text-xs text-slate-900">
+              <span className="flex-shrink-0 h-5 w-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
                 {n}
               </span>
-              <span>{text}</span>
+              <span className="leading-relaxed">{text}</span>
             </li>
           ))}
         </ol>
       </div>
 
       {/* ── Footer ───────────────────────────────────────────────────── */}
-      <div className="mt-auto px-4 py-3 border-t border-slate-800">
-        <p className="text-[10px] text-slate-600 text-center">
+      <div className="mt-auto px-4 py-3 border-t border-slate-200">
+        <p className="text-[10px] text-slate-900 text-center">
           Cloud For Good · Team ContrAI · AWS Hackathon 2026
         </p>
       </div>

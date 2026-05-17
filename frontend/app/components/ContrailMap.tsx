@@ -95,33 +95,34 @@ function greatCirclePoints(
   b: Airport,
   steps = 80
 ): [number, number][] {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const toDeg = (r: number) => (r * 180) / Math.PI;
-  const lat1 = toRad(a.lat),
-    lon1 = toRad(a.lon);
-  const lat2 = toRad(b.lat),
-    lon2 = toRad(b.lon);
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const toDeg = (rad: number) => (rad * 180) / Math.PI;
+  const lat1 = toRad(a.lat), lon1 = toRad(a.lon);
+  const lat2 = toRad(b.lat), lon2 = toRad(b.lon);
+
+  // Angular distance between the two points
+  const d = Math.acos(
+    Math.max(-1, Math.min(1,
+      Math.sin(lat1) * Math.sin(lat2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1)
+    ))
+  );
+
+  if (d === 0) return Array(steps + 1).fill([a.lat, a.lon]);
+
   const points: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const f = i / steps;
-    const A = Math.sin((1 - f) * Math.PI);
-    const B2 = Math.sin(f * Math.PI);
-    const d = Math.acos(
-      Math.sin(lat1) * Math.sin(lat2) +
-        Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1)
-    );
-    if (d === 0) {
-      points.push([a.lat, a.lon]);
-      continue;
-    }
-    const x =
-      A * Math.cos(lat1) * Math.cos(lon1) + B2 * Math.cos(lat2) * Math.cos(lon2);
-    const y =
-      A * Math.cos(lat1) * Math.sin(lon1) + B2 * Math.cos(lat2) * Math.sin(lon2);
-    const z = A * Math.sin(lat1) + B2 * Math.sin(lat2);
-    const lat = toDeg(Math.atan2(z, Math.sqrt(x * x + y * y)));
-    const lon = toDeg(Math.atan2(y, x));
-    points.push([lat, lon]);
+    // Correct spherical linear interpolation (SLERP)
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+    const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+    const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+    points.push([
+      toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))),
+      toDeg(Math.atan2(y, x)),
+    ]);
   }
   return points;
 }
@@ -175,6 +176,8 @@ export default function ContrailMap() {
   const markerLayerRef = useRef<L.LayerGroup | null>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const geojsonLayerRef = useRef<L.GeoJSON | null>(null);
+  // All polygon outer rings extracted directly from GeoJSON — avoids Leaflet layer traversal bugs
+  const riskRingsRef = useRef<[number, number][][]>([]);
 
   const [airports, setAirports] = useState<Airport[]>([]);
   const [origin, setOrigin] = useState<Airport | null>(null);
@@ -182,6 +185,8 @@ export default function ContrailMap() {
   const [aircraft, setAircraft] = useState<AircraftType>(AIRCRAFT_TYPES[1]);
   const [popupData, setPopupData] = useState<ContrailFeature | null>(null);
   const [geojsonMeta, setGeojsonMeta] = useState<Record<string, string>>({});
+  // Signals when the GeoJSON rings are ready — used as a route-effect dependency
+  const [ringsReady, setRingsReady] = useState(false);
   const [routeKm, setRouteKm] = useState<number>(0);
   const [routeRiskKm, setRouteRiskKm] = useState<number>(0);
 
@@ -217,6 +222,23 @@ export default function ContrailMap() {
       .then((gj) => {
         if (!alive) return;
         setGeojsonMeta(gj.metadata ?? {});
+
+        // Build a flat list of outer rings for point-in-polygon checks.
+        // Done here directly from the GeoJSON data — no Leaflet layer traversal needed.
+        const rings: [number, number][][] = [];
+        for (const feature of gj.features ?? []) {
+          const geom = feature.geometry;
+          if (geom?.type === "Polygon") {
+            rings.push(geom.coordinates[0] as [number, number][]);
+          } else if (geom?.type === "MultiPolygon") {
+            for (const poly of geom.coordinates as [number, number][][][]) {
+              rings.push(poly[0]);
+            }
+          }
+        }
+        riskRingsRef.current = rings;
+        setRingsReady(true); // triggers route effect to re-run if airports already selected
+
         const layer = L.geoJSON(gj, {
           style: (feature) => {
             const props = feature?.properties as ContrailFeature | undefined;
@@ -224,11 +246,6 @@ export default function ContrailMap() {
             return riskStyle(score);
           },
           onEachFeature: (feature, lyr) => {
-            // Store the outer ring coordinates for accurate point-in-polygon tests
-            const geom = feature.geometry as { type: string; coordinates: [number, number][][] };
-            if (geom.type === "Polygon") {
-              (lyr as L.Layer & { _ring?: [number, number][] })._ring = geom.coordinates[0];
-            }
             lyr.on("click", () => {
               setPopupData(feature.properties as ContrailFeature);
             });
@@ -344,24 +361,24 @@ export default function ContrailMap() {
     // Estimate km of route inside risk polygons using point-in-polygon.
     // Each route point is tested against actual polygon rings — not bounding boxes —
     // so overlapping polygons and large sparse polygons don't inflate the number.
-    const gjLayer = geojsonLayerRef.current;
-    if (gjLayer) {
-      const inRisk = new Array(pts.length).fill(false);
-      gjLayer.eachLayer((l) => {
-        const ring = (l as L.Layer & { _ring?: [number, number][] })._ring;
-        if (!ring) return;
-        pts.forEach(([lat, lon], i) => {
-          if (!inRisk[i] && pointInRing(lon, lat, ring)) inRisk[i] = true;
-        });
-      });
-      const riskFraction = inRisk.filter(Boolean).length / pts.length;
+    const rings = riskRingsRef.current;
+    if (rings.length > 0) {
+      const inRisk = pts.map(([lat, lon]) =>
+        rings.some((ring) => pointInRing(lon, lat, ring))
+      );
+      const hitCount = inRisk.filter(Boolean).length;
+      const riskFraction = hitCount / pts.length;
+      console.debug(
+        `[ContrAI] ${origin?.code}→${destination?.code}: ${hitCount}/${pts.length} pts in risk zones`,
+        `(${Math.round(riskFraction * 100)}% of ${Math.round(totalKm)} km)`
+      );
       setRouteRiskKm(Math.round(Math.min(riskFraction, 1) * totalKm));
     }
 
     // Fly map to route bounds
     const latLngs = pts.map(([lat, lon]) => L.latLng(lat, lon));
     map.fitBounds(L.latLngBounds(latLngs), { padding: [60, 60] });
-  }, [origin, destination]);
+  }, [origin, destination, ringsReady]);
 
   const handleClearRoute = () => {
     setOrigin(null);
@@ -389,26 +406,25 @@ export default function ContrailMap() {
         <div ref={mapDivRef} className="h-full w-full" />
 
         {/* ── Legend ─────────────────────────────────────────────────── */}
-        <div className="absolute bottom-6 right-4 z-[500] rounded-xl border border-slate-700 bg-slate-900/90 px-4 py-3 backdrop-blur-sm w-40">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
+        <div className="absolute bottom-6 right-4 z-[500] rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 shadow-lg w-40">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-800">
             Contrail Risk
           </p>
-          {/* Rainbow gradient bar */}
           <div
-            className="h-3 w-full rounded-sm mb-1"
+            className="h-2.5 w-full rounded-full mb-1"
             style={{
               background:
                 "linear-gradient(to right, hsl(240,85%,57%), hsl(180,85%,52%), hsl(120,85%,52%), hsl(60,95%,52%), hsl(30,95%,55%), hsl(0,95%,57%))",
             }}
           />
-          <div className="flex justify-between text-[10px] text-slate-400 mb-3">
+          <div className="flex justify-between text-[10px] text-slate-800 mb-3">
             <span>Low</span>
-            <span>Medium</span>
+            <span>Med</span>
             <span>High</span>
           </div>
-          <div className="border-t border-slate-700 pt-2 flex items-center gap-2">
-            <div className="h-0.5 w-6" style={{ borderTop: "2px dashed #38bdf8" }} />
-            <span className="text-xs text-slate-300">Flight Route</span>
+          <div className="border-t border-slate-300 pt-2 flex items-center gap-2">
+            <div className="h-0.5 w-6" style={{ borderTop: "2px dashed #3b82f6" }} />
+            <span className="text-[11px] text-slate-800">Flight Route</span>
           </div>
         </div>
 

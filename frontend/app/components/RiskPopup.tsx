@@ -10,8 +10,8 @@ interface Props {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between text-xs">
-      <span className="text-slate-400">{label}</span>
-      <span className="font-medium text-slate-200">{value}</span>
+      <span className="text-slate-600">{label}</span>
+      <span className="font-medium text-slate-700">{value}</span>
     </div>
   );
 }
@@ -20,8 +20,8 @@ export default function RiskPopup({ data, onClose }: Props) {
   const score = featureRiskScore(data);
   const accentColor = riskScoreToHex(score);
 
-  // Derive display values — support both schemas
-  const isPersistent = data.label === "persistent" || (data.risk_level === "high") || score >= 0.9;
+  const isPersistent =
+    data.label === "persistent" || data.risk_level === "high" || score >= 0.9;
   const riskLabel =
     data.risk_level ??
     (data.label === "persistent" ? "high" : data.label === "short" ? "medium" : "low");
@@ -30,25 +30,21 @@ export default function RiskPopup({ data, onClose }: Props) {
     data.temperature_k !== undefined
       ? `${(data.temperature_k - 273.15).toFixed(1)} °C (${data.temperature_k.toFixed(1)} K)`
       : "—";
-
   const rhiDisplay =
     data.rhi !== undefined ? `${(data.rhi * 100).toFixed(0)}%` : "—";
-
   const altDisplay =
     data.altitude_ft !== undefined
       ? `${data.altitude_ft.toLocaleString()} ft`
       : "250 hPa (~34,000 ft)";
-
   const areaDisplay =
     data.area_km2 !== undefined ? `${data.area_km2.toLocaleString()} km²` : "—";
-
   const timeDisplay =
     data.valid_time !== undefined
       ? new Date(data.valid_time).toUTCString().replace(" GMT", " UTC")
       : "—";
 
   return (
-    <div className="absolute top-4 right-4 z-[600] w-72 rounded-xl border border-slate-700 bg-slate-900/95 p-4 shadow-2xl backdrop-blur-md">
+    <div className="absolute top-4 right-4 z-[600] w-72 rounded-xl border border-slate-300 bg-slate-100 p-4 shadow-xl">
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div>
@@ -57,12 +53,12 @@ export default function RiskPopup({ data, onClose }: Props) {
             style={{
               color: accentColor,
               borderColor: accentColor,
-              background: `color-mix(in srgb, ${accentColor} 15%, transparent)`,
+              background: `color-mix(in srgb, ${accentColor} 12%, transparent)`,
             }}
           >
             {riskLabel} risk
           </span>
-          <p className="mt-1.5 text-sm font-semibold text-slate-100 leading-snug">
+          <p className="mt-1.5 text-sm font-semibold text-slate-800 leading-snug">
             {data.label === "persistent"
               ? "Persistent contrail region"
               : data.label === "short"
@@ -72,7 +68,7 @@ export default function RiskPopup({ data, onClose }: Props) {
         </div>
         <button
           onClick={onClose}
-          className="ml-2 flex-shrink-0 text-slate-500 hover:text-slate-200 transition-colors text-lg leading-none"
+          className="ml-2 flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-slate-600 hover:text-slate-600 hover:bg-slate-200 transition-colors text-base leading-none"
         >
           ×
         </button>
@@ -81,24 +77,24 @@ export default function RiskPopup({ data, onClose }: Props) {
       {/* Risk score bar */}
       <div className="mb-3">
         <div className="flex justify-between mb-1">
-          <span className="text-xs text-slate-400">Risk Score</span>
-          <span className="text-xs font-bold text-slate-200">
+          <span className="text-xs text-slate-600">Risk Score</span>
+          <span className="text-xs font-bold text-slate-600">
             {(score * 100).toFixed(0)}%
           </span>
         </div>
-        <div className="h-1.5 w-full rounded-full bg-slate-700">
+        <div className="h-1.5 w-full rounded-full bg-slate-200">
           <div
             className="h-1.5 rounded-full transition-all"
             style={{
               width: `${score * 100}%`,
-              background: `linear-gradient(to right, hsl(240,85%,57%), ${accentColor})`,
+              background: `linear-gradient(to right, #fbbf24, ${accentColor})`,
             }}
           />
         </div>
       </div>
 
       {/* Stats */}
-      <div className="space-y-2 border-t border-slate-800 pt-3">
+      <div className="space-y-2 border-t border-slate-200 pt-3">
         <Row label="Type" value={isPersistent ? "Persistent (ISSR)" : "Short-lived"} />
         <Row label="Altitude" value={altDisplay} />
         <Row label="Temperature" value={tempC} />
@@ -108,7 +104,7 @@ export default function RiskPopup({ data, onClose }: Props) {
       </div>
 
       {/* Interpretation */}
-      <p className="mt-3 text-[11px] text-slate-500 leading-relaxed">
+      <p className="mt-3 text-[11px] text-slate-600 leading-relaxed">
         {isPersistent
           ? "Ice-supersaturated air. Contrails will persist and spread into cirrus, contributing to warming."
           : "Below ice saturation. Contrails form but quickly sublimate — lower climate impact."}
