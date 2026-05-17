@@ -3,7 +3,9 @@
 > Cloud For Good · AWS Hackathon 2026  
 > Team: Leon Truong · Luke Prasarttongosoth · Daniel Mitroshkov · Raio Chea
 
-Contrails account for roughly **57% of aviation's total climate impact** — more than CO₂ alone.
+Contrails account for roughly **30% of aviation's total climate impact** — more than CO₂ alone.
+This environmental burden can be easily reduced so long as a flight is aware of the contrail-risk
+zones and avoids them. ContrAI helps make this information publically accessible and interpretable.
 ContrAI predicts where persistent contrails will form using real GFS weather data and the
 [pycontrails](https://py.contrails.earth/) scientific library, then displays risk zones on an
 interactive map so pilots, dispatchers, and curious users can see the climate cost of any flight.
