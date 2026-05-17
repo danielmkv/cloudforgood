@@ -193,7 +193,7 @@ export default function ContrailMap() {
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const geojsonLayerRef = useRef<L.GeoJSON | null>(null);
   // All polygon outer rings extracted directly from GeoJSON — avoids Leaflet layer traversal bugs
-  const riskRingsRef = useRef<[number, number][][]>([]);
+  const riskRingsRef = useRef<Array<{ ring: [number, number][]; intensity: number }>>([]);
 
   const [airports, setAirports] = useState<Airport[]>([]);
   const [origin, setOrigin] = useState<Airport | null>(null);
@@ -241,19 +241,24 @@ export default function ContrailMap() {
           if (!alive) return;
           setGeojsonMeta(gj.metadata ?? {});
 
-          const rings: [number, number][][] = [];
+          const rings: Array<{ ring: [number, number][]; intensity: number }> = [];
           for (const feature of gj.features ?? []) {
-            const score = featureRiskScore(feature.properties as ContrailFeature);
-            if (score < RISK_THRESHOLD) continue;
+            const intensity = featureRiskScore(feature.properties as ContrailFeature);
+            // Skip the 0.10 tier: it covers most cold airspace and is visually
+            // indistinguishable from the basemap, so counting it just gives every
+            // northern flight a phantom 10% floor.
+            if (intensity < 0.2) continue;
             const geom = feature.geometry;
             if (geom?.type === "Polygon") {
-              rings.push(geom.coordinates[0] as [number, number][]);
+              rings.push({ ring: geom.coordinates[0] as [number, number][], intensity });
             } else if (geom?.type === "MultiPolygon") {
               for (const poly of geom.coordinates as [number, number][][][]) {
-                rings.push(poly[0]);
+                rings.push({ ring: poly[0], intensity });
               }
             }
           }
+          // Sort highest intensity first so route math can short-circuit per point.
+          rings.sort((a, b) => b.intensity - a.intensity);
           riskRingsRef.current = rings;
           setRingsReady(true);
 
@@ -380,18 +385,24 @@ export default function ContrailMap() {
         .addTo(rl);
     });
 
-    // Estimate km of route inside risk polygons using point-in-polygon.
-    // Each route point is tested against actual polygon rings — not bounding boxes —
-    // so overlapping polygons and large sparse polygons don't inflate the number.
+    // Weighted route risk: at each route point, take the max intensity of any
+    // containing polygon, then average across all points. A route through faint
+    // 0.25 zones scores ~0.25; one crossing a 0.8 hotspot scores higher.
+    // Rings are pre-sorted highest-intensity-first, so we can short-circuit.
     const rings = riskRingsRef.current;
     if (rings.length > 0) {
-      const inRisk = pts.map(([lat, lon]) =>
-        rings.some((ring) => pointInRing(lon, lat, ring))
-      );
-      const hitCount = inRisk.filter(Boolean).length;
-      const riskFraction = hitCount / pts.length;
+      let weightedSum = 0;
+      for (const [lat, lon] of pts) {
+        for (const { ring, intensity } of rings) {
+          if (pointInRing(lon, lat, ring)) {
+            weightedSum += intensity;
+            break;
+          }
+        }
+      }
+      const riskFraction = weightedSum / pts.length;
       console.debug(
-        `[ContrAI] ${origin?.code}→${destination?.code}: ${hitCount}/${pts.length} pts in risk zones`,
+        `[ContrAI] ${origin?.code}→${destination?.code}: avg intensity ${riskFraction.toFixed(3)}`,
         `(${Math.round(riskFraction * 100)}% of ${Math.round(totalKm)} km)`
       );
       setRouteRiskKm(Math.round(Math.min(riskFraction, 1) * totalKm));
