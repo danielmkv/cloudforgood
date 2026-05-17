@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ContrailFeature, featureRiskScore, riskScoreToHex, riskLevelFromScore } from "./ContrailMap";
 
 interface Props {
@@ -16,7 +17,46 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+const metricHelp = [
+  {
+    label: "Risk Score",
+    description:
+      "A 0-100% estimate of contrail persistence risk for this region. Higher scores mean stronger warming potential.",
+  },
+  {
+    label: "Type",
+    description:
+      "Persistent ISSR means ice-supersaturated air where contrails can linger and spread. Short-lived means contrails fade quickly.",
+  },
+  {
+    label: "Altitude",
+    description:
+      "The flight level or pressure layer used by the forecast for this region.",
+  },
+  {
+    label: "Temperature",
+    description:
+      "Ambient air temperature at the forecast altitude. Very cold air makes contrail formation more likely.",
+  },
+  {
+    label: "Rel. Humidity (ice)",
+    description:
+      "Relative humidity measured against ice saturation. Values near or above 100% support persistent ice crystals.",
+  },
+  {
+    label: "Polygon Area",
+    description:
+      "The approximate surface area covered by this forecast risk zone.",
+  },
+  {
+    label: "Valid Time",
+    description:
+      "The UTC forecast time represented by this risk zone.",
+  },
+];
+
 export default function RiskPopup({ data, onClose }: Props) {
+  const [showMetricHelp, setShowMetricHelp] = useState(false);
   const score = featureRiskScore(data);
   const accentColor = riskScoreToHex(score);
 
@@ -93,6 +133,23 @@ export default function RiskPopup({ data, onClose }: Props) {
 
       {/* Stats */}
       <div className="space-y-2 border-t border-neutral-800 pt-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-neutral-500">
+            Metrics
+          </p>
+          <button
+            type="button"
+            aria-expanded={showMetricHelp}
+            aria-controls="risk-popup-metric-help"
+            onClick={() => setShowMetricHelp((open) => !open)}
+            className="inline-flex h-6 items-center gap-1 rounded-full border border-neutral-700 px-2 text-[11px] font-semibold text-neutral-300 transition-colors hover:border-blue-500 hover:text-blue-300"
+          >
+            <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-current text-[10px] leading-none">
+              i
+            </span>
+            Info
+          </button>
+        </div>
         <Row label="Type" value={isPersistent ? "Persistent (ISSR)" : "Short-lived"} />
         <Row label="Altitude" value={altDisplay} />
         <Row label="Temperature" value={tempC} />
@@ -100,6 +157,24 @@ export default function RiskPopup({ data, onClose }: Props) {
         <Row label="Polygon Area" value={areaDisplay} />
         <Row label="Valid Time" value={timeDisplay} />
       </div>
+
+      {showMetricHelp && (
+        <div
+          id="risk-popup-metric-help"
+          className="mt-3 space-y-2 rounded-lg border border-neutral-800 bg-neutral-950/90 p-3"
+        >
+          {metricHelp.map((metric) => (
+            <div key={metric.label}>
+              <p className="text-[11px] font-semibold text-neutral-200">
+                {metric.label}
+              </p>
+              <p className="text-[11px] leading-relaxed text-neutral-500">
+                {metric.description}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Interpretation */}
       <p className="mt-3 text-[11px] text-neutral-500 leading-relaxed">

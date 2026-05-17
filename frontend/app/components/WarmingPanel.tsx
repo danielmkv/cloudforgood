@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Airport, AircraftType } from "./ContrailMap";
 
 interface Props {
@@ -71,6 +72,44 @@ function Stat({ label, value, sub, accentColor }: StatProps) {
   );
 }
 
+const metricHelp = [
+  {
+    label: "Route Distance",
+    description:
+      "The great-circle distance between the selected origin and destination airports.",
+  },
+  {
+    label: "Risk Zones",
+    description:
+      "The share of the route that crosses forecast regions with meaningful contrail persistence risk.",
+  },
+  {
+    label: "Fuel Burn",
+    description:
+      "Estimated kerosene consumed over the route using the selected aircraft type's fuel burn rate.",
+  },
+  {
+    label: "CO₂ Emitted",
+    description:
+      "Direct carbon dioxide released by burning the estimated fuel load.",
+  },
+  {
+    label: "CO₂ Impact",
+    description:
+      "The direct CO₂ warming impact expressed as tonnes of CO₂ equivalent over a 100-year horizon.",
+  },
+  {
+    label: "Contrail Impact",
+    description:
+      "Estimated warming from persistent contrails on risky route segments, expressed as tonnes of CO₂ equivalent.",
+  },
+  {
+    label: "Contrail Share",
+    description:
+      "The percent of total estimated warming caused by contrails instead of direct CO₂ emissions.",
+  },
+];
+
 export default function WarmingPanel({
   origin,
   destination,
@@ -78,6 +117,7 @@ export default function WarmingPanel({
   routeKm,
   routeRiskKm,
 }: Props) {
+  const [showMetricHelp, setShowMetricHelp] = useState(false);
   const w = computeWarming(routeKm, routeRiskKm, aircraft);
   const riskPct = routeKm > 0 ? Math.min(100, Math.round((routeRiskKm / routeKm) * 100)) : 0;
   const color = riskColor(w.contrailPct);
@@ -91,10 +131,22 @@ export default function WarmingPanel({
           <span className="text-neutral-500 text-xs">→</span>
           <span className="text-sm font-bold text-violet-400">{destination.code}</span>
         </div>
-        <div className="flex gap-3 text-xs text-neutral-400">
+        <div className="flex items-center gap-3 text-xs text-neutral-400">
           <span>{routeKm.toLocaleString()} km</span>
           <span className="text-neutral-700">·</span>
           <span className="font-semibold" style={{ color }}>{riskPct}% in risk zones</span>
+          <button
+            type="button"
+            aria-expanded={showMetricHelp}
+            aria-controls="warming-panel-metric-help"
+            onClick={() => setShowMetricHelp((open) => !open)}
+            className="inline-flex h-6 items-center gap-1 rounded-full border border-neutral-700 px-2 text-[11px] font-semibold text-neutral-300 transition-colors hover:border-blue-500 hover:text-blue-300"
+          >
+            <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-current text-[10px] leading-none">
+              i
+            </span>
+            Info
+          </button>
         </div>
       </div>
 
@@ -121,6 +173,24 @@ export default function WarmingPanel({
           <div className="bg-blue-900 h-full flex-1" />
         </div>
       </div>
+
+      {showMetricHelp && (
+        <div
+          id="warming-panel-metric-help"
+          className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2 rounded-lg border border-neutral-800 bg-neutral-950/90 p-3"
+        >
+          {metricHelp.map((metric) => (
+            <div key={metric.label}>
+              <p className="text-[11px] font-semibold text-neutral-200">
+                {metric.label}
+              </p>
+              <p className="text-[11px] leading-relaxed text-neutral-500">
+                {metric.description}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
