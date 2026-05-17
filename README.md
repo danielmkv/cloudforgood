@@ -7,7 +7,7 @@ Contrails account for roughly **30–50% of aviation's total climate impact** �
 This burden is addressable: a flight that knows where persistent contrails will form can shift altitude
 by a few thousand feet and avoid them. ContrAI makes that information publicly accessible.
 
-ContrAI fetches real NOAA GFS weather data every 6 hours, runs the Schmidt–Appleman criterion to
+Contraiλ fetches real NOAA GFS weather data every 6 hours, runs the Schmidt–Appleman criterion to
 predict ice-supersaturated regions at cruise altitude, and renders the results as an interactive
 risk map. Pilots, dispatchers, and climate-conscious travellers can visualise the warming cost of
 any route in seconds.
