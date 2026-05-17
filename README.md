@@ -1,4 +1,4 @@
-# ContrAI — Contrail Formation Risk Forecast
+# Contraiλ — Contrail Formation Risk Forecast
 
 > **AWS Hackathon 2026 — Serverless Track**
 > Cloud For Good · Team: Leon Truong · Luke Prasarttongosoth · Daniel Mitroshkov · Raio Chea
