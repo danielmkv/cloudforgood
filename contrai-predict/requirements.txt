@@ -5,3 +5,4 @@ cfgrib
 eccodes
 rasterio
 shapely
+scipy

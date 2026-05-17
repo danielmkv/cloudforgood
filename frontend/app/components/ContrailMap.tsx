@@ -36,6 +36,18 @@ export function featureRiskScore(f: ContrailFeature): number {
   return 0;
 }
 
+/** Minimum intensity at which a polygon counts as a "risk zone" for route math
+ * and for the popup high/medium/low label. Polygons below this are too faint
+ * to be meaningful (lightest navy tier just means "cold air at altitude"). */
+export const RISK_THRESHOLD = 0.4;
+
+/** High/medium/low label derived from the unified risk score. */
+export function riskLevelFromScore(score: number): "high" | "medium" | "low" {
+  if (score >= 0.6) return "high";
+  if (score >= RISK_THRESHOLD) return "medium";
+  return "low";
+}
+
 export interface AircraftType {
   id: string;
   label: string;
@@ -154,18 +166,23 @@ function pointInRing(lon: number, lat: number, ring: [number, number][]): boolea
 }
 
 // ── Airport marker icon ───────────────────────────────────────────────────
+// 10px visible dot, 28px transparent hit area for easier hover/click.
 const airportIcon = (selected: boolean) =>
   L.divIcon({
     className: "",
     html: `<div style="
+      width:28px;height:28px;
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;
+    "><div style="
       width:10px;height:10px;border-radius:50%;
       background:${selected ? "#38bdf8" : "#64748b"};
       border:2px solid ${selected ? "#0ea5e9" : "#475569"};
       box-shadow: 0 0 ${selected ? "8px #38bdf8" : "0"};
       transition: all 0.2s;
-    "></div>`,
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
+    "></div></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
   });
 
 // ── Main component ────────────────────────────────────────────────────────
@@ -226,6 +243,8 @@ export default function ContrailMap() {
 
           const rings: [number, number][][] = [];
           for (const feature of gj.features ?? []) {
+            const score = featureRiskScore(feature.properties as ContrailFeature);
+            if (score < RISK_THRESHOLD) continue;
             const geom = feature.geometry;
             if (geom?.type === "Polygon") {
               rings.push(geom.coordinates[0] as [number, number][]);

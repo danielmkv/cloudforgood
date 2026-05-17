@@ -12,6 +12,7 @@ import sys
 import json
 import numpy as np
 import xarray as xr
+from scipy.ndimage import gaussian_filter
 from shapely.geometry import shape, mapping
 import rasterio.features
 from rasterio.transform import from_bounds
@@ -43,11 +44,12 @@ def compute_score(grib_path, pressure_level=250):
     rh_factor = np.clip(rh_ice / 1.2, 0, 1)         # 0 dry, 1 strongly supersaturated
     cold = t < 233.0
     score = np.where(cold, t_margin * rh_factor, 0.0).astype(np.float32)
+    score = gaussian_filter(score, sigma=1.5)
 
     return score, lats, lons
 
 
-def score_to_geojson(score, lats, lons, simplify=0.5):
+def score_to_geojson(score, lats, lons, simplify=0.2):
     """Polygonize at 5 intensity thresholds."""
     lons_180 = np.where(lons > 180, lons - 360, lons)
     height, width = score.shape

@@ -9,6 +9,7 @@ import json
 import boto3
 import numpy as np
 import xarray as xr
+from scipy.ndimage import gaussian_filter
 from shapely.geometry import shape, mapping
 import rasterio.features
 from rasterio.transform import from_bounds
@@ -53,11 +54,12 @@ def compute_contrail_score(grib_path):
     rh_factor = np.clip(rh_ice / 1.2, 0, 1)
     cold = t < 233.0
     score = np.where(cold, t_margin * rh_factor, 0.0).astype(np.float32)
+    score = gaussian_filter(score, sigma=1.5)
 
     return score, lats, lons
 
 
-def score_to_geojson(score, lats, lons, simplify=0.5):
+def score_to_geojson(score, lats, lons, simplify=0.2):
     """Polygonize the score raster at 5 intensity thresholds for a nested gradient."""
     lons_180 = np.where(lons > 180, lons - 360, lons)
 

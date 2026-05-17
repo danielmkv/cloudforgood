@@ -1,6 +1,6 @@
 "use client";
 
-import { ContrailFeature, featureRiskScore, riskScoreToHex } from "./ContrailMap";
+import { ContrailFeature, featureRiskScore, riskScoreToHex, riskLevelFromScore } from "./ContrailMap";
 
 interface Props {
   data: ContrailFeature;
@@ -20,11 +20,9 @@ export default function RiskPopup({ data, onClose }: Props) {
   const score = featureRiskScore(data);
   const accentColor = riskScoreToHex(score);
 
+  const riskLabel = data.risk_level ?? riskLevelFromScore(score);
   const isPersistent =
-    data.label === "persistent" || data.risk_level === "high" || score >= 0.9;
-  const riskLabel =
-    data.risk_level ??
-    (data.label === "persistent" ? "high" : data.label === "short" ? "medium" : "low");
+    riskLabel === "high" || data.label === "persistent" || score >= 0.6;
 
   const tempC =
     data.temperature_k !== undefined
